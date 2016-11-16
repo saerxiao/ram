@@ -231,7 +231,7 @@ function layer:backward(input, gradOutput, scale)
   local grad_a_sum = self.buffer3:resize(1, 4 * H):sum(grad_a, 1)
   grad_b:add(scale, grad_a_sum)
 
-  grad_h:mm(grad_a, Wh:t()) -- grad_h means now grad_h(t) via h(t+1)
+  grad_h:mm(grad_a, Wh:t()) -- grad_h now means (dLdh(t+1))(dh(t+1)dh(t))
   grad_c:cmul(f)
   
 --  grad_prev_h:copy(grad_next_h)

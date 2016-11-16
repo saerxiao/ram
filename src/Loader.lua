@@ -5,7 +5,12 @@ local Loader = {}
 Loader.__index = Loader
 
 local function loadDataset(fileName, maxLoad)
-    local f = torch.load(fileName, 'ascii')
+    local f = nil
+    if string.match(fileName, '32x32') then
+      f = torch.load(fileName, 'ascii')
+    else
+      f = torch.load(fileName)
+    end
     local data = f.data:type(torch.getdefaulttensortype())
     local labels = f.labels
 
@@ -16,58 +21,14 @@ local function loadDataset(fileName, maxLoad)
     end
     data = data[{{1,nExample},{},{},{}}]
     labels = labels[{{1,nExample}}]
-    
---    if not isConvNet then
---      local size_per_row = 1
---      for i = 2,data:size():size() do
---        size_per_row = size_per_row * data:size(i)
---      end
---      data = data:view(data:size(1), size_per_row)
---    end
 
     local dataset = {}
     dataset.data = data
     dataset.labels = labels
-    
---    function dataset:normalize(mean_, std_)
---      local mean = mean_ or data:view(data:size(1), -1):mean(1)
---      local std = std_ or data:view(data:size(1), -1):std(1, true)
---      for i=1,data:size(1) do
---         data[i]:add(-mean[1][i])
---         if std[1][i] > 0 then
---            tensor:select(2, i):mul(1/std[1][i])
---         end
---      end
---      return mean, std
---    end
---
---    function dataset:normalizeGlobal(mean_, std_)
---      local std = std_ or data:std()
---      local mean = mean_ or data:mean()
---      data:add(-mean)
---      data:mul(1/std)
---      return mean, std
---    end
 
     function dataset:size()
       return nExample
     end
-
---    local labelstensor = torch.zeros(nExample, 10)
---    for i = 1, nExample do
---      labelstensor[i][labels[i]] = 1
---    end
---    dataset.labels = labelstensor
---    local labelvector = torch.zeros(10)
---
---    setmetatable(dataset, {__index = function(self, index)
---           local input = self.data[index]
---           local class = self.labels[index]
---           local label = labelvector:zero()
---           label[class] = 1
---           local example = {input, label}
---                                       return example
---    end})
 
     return dataset
 end
@@ -95,9 +56,7 @@ function Loader.create(opt)
   
   
   self.training_size = math.ceil(self.trainingData.size()* (opt.validate_split or 0.9))
---  trainset = get_subset(trainingData, 1, training_size)
---  self.valset = get_subset(trainingData,training_size+1, trainingData:size(1))
-  
+
   self.batch_size = opt.batch_size or 1
   local batches = {}
   batches.train_data = self.trainingData.data[{{1, self.training_size}}]:split(self.batch_size)
@@ -115,12 +74,6 @@ function Loader.create(opt)
   split_size.validate = #batches.validate_data
   split_size.test = #batches.test_data
   self.split_size = split_size
-  
---  local batch_cursor = {}
---  batch_cursor.train = 0
---  batch_cursor.validate = 0
---  batch_cursor.test = 0
---  self.batch_cursor = batch_cursor
 
   return self
 end
@@ -133,19 +86,6 @@ function Loader:get_validate_data()
   return self.trainingData.data[{{self.training_size+1, self.trainingData:size()}}],
          self.trainingData.labels[{{self.training_size+1, self.trainingData:size()}}]
 end
-
---function Loader:reset_batch(split)
---  self.batch_cursor[split] = 0
---end
-
---function Loader:next_batch(split)
---  self.batch_cursor[split] = self.batch_cursor[split] + 1
---  if (self.batch_cursor[split] > #self.batches[split .. "_data"]) then
---    self.batch_cursor[split] = 1
---  end
---  return self.batches[split .. "_data"][self.batch_cursor[split]],
---         self.batches[split .. "_labels"][self.batch_cursor[split]]
---end
 
 function Loader:iterator(split)
   local it = {}

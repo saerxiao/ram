@@ -1,17 +1,13 @@
 require 'torch'
-require 'Ram'
+require 'Ram1'
 require 'nn'
 require 'optim'
 require 'pl'
 
--- best so far for model with tanh, data size: 10000, batch = 100, r0=5e-3, decay_every = 3 epoch, decay_rate = 0.9, exploreation rate = 0.2
--- nepochs = 30, final val_loss = 1.42, val_accuracy = 65%
--- model without tanh has lower val_loss, seems similar val_accuracy
-
 cmd = torch.CmdLine()
 cmd:option('-source', 'nmist', 'directory for source data') --tinyshakespeare, qts, qsc
 cmd:option('-validate_split', 0.9, 'sequence length')
---cmd:option('-train_max_load', 10000, 'loading size')
+cmd:option('-train_max_load', 10000, 'loading size')
 
 -- Model options
 cmd:option('-init_from', '')
@@ -22,16 +18,16 @@ cmd:option('-glimpse_hidden_size', 128)
 cmd:option('-glimpse_output_size', 256)
 cmd:option('-rnn_hidden_size', 256)
 cmd:option('-nClasses', 10)
-cmd:option('-location_gaussian_std', 0.03) -- 0.1
-cmd:option('-exploration_rate', 0.5)
+cmd:option('-location_gaussian_std', 0.1) -- 0.1
+cmd:option('-exploration_rate', 0.15)
 cmd:option('-episodes', 5, 'number of episodes')  -- 10 not better
-cmd:option('-lamda', 1)
+cmd:option('-lamda', 10)
 cmd:option('-random_glimpse', false, 'whether the glimpses are random')
 
 -- training options
 cmd:option('-batch_size', 20, 'batch size')
-cmd:option('-nepochs', 30, 'number of epochs')
-cmd:option('-learning_rate',5e-3,'learning rate')
+cmd:option('-nepochs', 10, 'number of epochs')
+cmd:option('-learning_rate',5e-4,'learning rate')
 cmd:option('-momentum', 0.9,'momentum')
 cmd:option('-lr_decay_every', 5)   -- lr_decay_every=3, lr_decay_factor=0.9 seems to work well for train_max_load=10000 and batch_size=100
 cmd:option('-lr_decay_factor', 0.7)
@@ -69,11 +65,13 @@ end
 local Loader = require 'Loader'
 local loader = Loader.create(opt)
 
-local net = Ram(opt)
+local net = Ram1(opt)
+local criterior = nn.CrossEntropyCriterion()
 
 -- ship the model to the GPU if desired
 if opt.gpuid == 0 then
-  net = net:ship2cuda()
+  net = net:cuda()
+  criterior = criterior:cuda()
   type = net:type()
 end
 
@@ -82,67 +80,38 @@ local params, grads = net:getParameters()
 local trainIter = loader:iterator("train")
 
 local feval = function(w)
+  net:isTrain()
   if w ~= params then
     params:copy(w)
   end
+  grads:zero()
   
   local data, label = trainIter.next_batch()
   data = data:type(type)
   label = label:type(type)
-  local N, T, randomGlimpse = data:size(1), opt.glimpses, opt.random_glimpse
+  local N, E, T, randomGlimpse = data:size(1), opt.episodes, opt.glimpses, opt.random_glimpse
   
-  local loss = 0
+  local score = net:forward(data)
+  local score_view = score:view(N*E, -1)
+  local label_view = label.new():resize(N*E):copy(label:view(N, 1):expand(N, E))
+  local loss = criterior:forward(score_view, label_view)
   
-  if not randomGlimpse then
-    local nEpisodes = opt.episodes
-    local reward = label.new():zeros(N, nEpisodes)
-    local l_m_all = label.new():resize(nEpisodes, N, T, 2)
-    for ep = 1, nEpisodes do
-      local score, l_m = net:forward(data)
-      loss = loss + net:computeLoss(score, label)
-      l_m_all[ep]:copy(l_m)
-      local _, predict = score[{{}, T}]:max(2)
-      predict = predict:squeeze():type(type)
-      reward[{{}, ep}] = torch.eq(predict, label):type(type)
-    end
+  local _, predict = score_view:max(2)
+  predict = predict:squeeze():type(type)
   
-    local rewardBaseline = reward:sum(2) / nEpisodes -- N x 1
-    reward:add(-1, rewardBaseline:expand(N, nEpisodes)):mul(opt.lamda) -- N x nEpisodes
-    
-    local gradsClassificationSum = grads.new():zeros(grads:size())
-    local gradsLocationSum = grads.new():zeros(grads:size())
+  local reward = torch.eq(predict, label_view):view(N, E):type(type)
   
-    for ep = 1, nEpisodes do
-      grads:zero()
-      local score, _, _ = net:forward(data, l_m_all[ep])
-      net:computeLoss(score, label)
-    
-      net:backwardFromClassification(score, label, l_m_all[ep])
-      gradsClassificationSum:add(grads)
-    
-      grads:zero()
-      net:backwardFromLocation(reward[{{}, ep}], l_m_all[ep])
-      gradsLocationSum:add(grads)
-    end
+  local rewardBaseline = reward:sum(2) / E  -- N x 1
+  reward:add(-1, rewardBaseline:expand(N, E)):mul(opt.lamda) -- N x E
   
-    grads:zero():add(gradsClassificationSum):add(gradsLocationSum):div(nEpisodes)
-    loss = loss/nEpisodes
-  else
-    grads:zero()
-    local score, l_m = net:forward(data)
-    loss = loss + net:computeLoss(score, label)
-    
-    net:backwardFromClassification(score, label, l_m)
-  end
-
-  if opt.grad_clip > 0 then
-    grads:clamp(-opt.grad_clip, opt.grad_clip)
-  end
+  local gradScore = criterior:backward(score_view, label_view):view(N, E, -1)
+  net:backward(gradScore, reward)
   
   return loss, grads
 end
 
 local function calAccuracy(split)
+  net:predict()
   local it = loader:iterator(split)
   local iter_per_epoch, T = loader.split_size[split], opt.glimpses
   local nTotal, hits, loss = 0, 0, 0
@@ -150,13 +119,13 @@ local function calAccuracy(split)
     local data, label = it.next_batch()
     data = data:type(type)
     label = label:type(type)
-    local scores = net:forward(data) -- N x T x C
-    local _, predict = scores[{{}, T}]:max(2)
+    local score = net:forward(data)[{{}, 1}] -- N x C
+    local _, predict = score:max(2)
     predict = predict:squeeze():type(label:type())
     hits = hits + torch.eq(label, predict):sum()
     nTotal = nTotal + label:size(1)
     
-    loss = loss + net:computeLoss(scores, label)
+    loss = loss + criterior:forward(score, label)
   end
   return loss/iter_per_epoch, hits/nTotal
 end
@@ -213,4 +182,3 @@ for i = 1, num_iterations do
 --    lr = lr * (1 - epoch / opt.nepochs)
 --  end
 end
-

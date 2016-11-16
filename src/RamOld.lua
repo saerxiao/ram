@@ -9,6 +9,21 @@ local glimpse = require 'Glimpse'
 
 local ram, parent = torch.class('Ram', 'nn.Module')
 
+-- TODO: the following code doesn't add the first model in the chain to the container, so 
+-- the first and the rest will have different weights, and the training will not update the weights of model at t=1
+-- this seems a mistake but why it trains much better
+--local function clone_n_times(model, nClones, container)
+--  local t = {}
+--  table.insert(t, model)
+--  for i = 2, nClones do
+--    local cloned = model:clone('weight', 'bias', 'gradWeight', 'gradBias')
+--    table.insert(t, cloned)
+--    container:add(cloned)
+--  end
+--  return t
+--end
+
+-- TODO: this should be the right implementation, but it trains much worse??
 local function clone_n_times(model, nClones, container)
   local t = {}
   for i = 1, nClones do
@@ -39,17 +54,18 @@ function ram:__init(kwargs)
   local rnn = nn.LSTM(D, H)
   local rnns = clone_n_times(rnn, T, container)
   
-  local classificationNet = nn.Linear(H, C)
-  container:add(classificationNet)
+  local classificationNet = nn.Sequential()
+  classificationNet:add(nn.Linear(H, C))
+--  classificationNet:add(nn.Tanh())
+  local classificationNets = clone_n_times(classificationNet, T, container)
   
-  local locationNet = nn.Sequential()
-  locationNet:add(nn.Linear(H, 2))
---  locationNet:add(nn.Tanh())
+  local locationNet = nn.Linear(H, 2)
   local locationNets = clone_n_times(locationNet, T, container)
   
   self.glimpses = glimpses
   self.rnns = rnns
-  self.classificationNet = classificationNet
+  self.classificationNets = classificationNets
+  self.classificationCriterior = nn.CrossEntropyCriterion()
   self.locationNets = locationNets
   self.container = container
 
@@ -63,6 +79,16 @@ function ram:__init(kwargs)
   self.buffer1 = torch.Tensor()
   self.buffer2 = torch.Tensor()
   
+end
+
+--function ram:randomGlimpse(isRandom)
+--  self.randomGlimpse = isRandom
+--end
+
+function ram:ship2cuda()
+  self:cuda()
+  self.classificationCriterior:cuda()
+  return self
 end
 
 function ram:parameters()
@@ -83,6 +109,7 @@ end
 
 function ram:forward(image, smapledLocation)
   local N, T, H, C, patchSize, std = image:size(1), self.T, self.H, self.C, self.patchSize, self.location_gaussian_std
+--  self.l_m:resize(N, T, 2)
   self.l:resize(N, T, 2)
   self.h:resize(N, T, H)
   self.patch:resize(N, T, patchSize*patchSize)
@@ -93,17 +120,23 @@ function ram:forward(image, smapledLocation)
   local computeLocation = not l_m
   
   -- initial location is the center of the image
+--  local l_m0 = self.buffer1:resize(N, 2):fill(0)
   if computeLocation then
-    l:zero()
+    l[{{}, 1}]:fill(0)  -- dummy
     
-    l_m = image.new():resize(N, T ,2):fill(0)
+    l_m = image.new():resize(N, T ,2)
 --    sampleFromGaussion(l_m[{{}, 1}], l[{{}, 1}], std)
+    l_m[{{}, 1}]:fill(0)
   end
-
+--  local l_m, l, h, patch = self.l_m, self.l, self.h, self.patch
+  
+--  l_m[{{}, 1}]:uniform(-0.5, 0.5)
+--  l_m[{{}, 1}]:fill(0)
   patch[{{}, 1}] = glimpse.computePatch(image,l_m[{{}, 1}], patchSize, self.exploration_rate)
   local processedPatch = self.glimpses[1]:forward({patch[{{}, 1}], l_m[{{}, 1}]})
-  local score = image.new():resize(N, C)
+  local score = image.new():resize(N, T, C)
   local rnnInputs, rnnInput, prev_h, prev_c = {}, nil, nil, nil
+--  local std = self.buffer1:resize(N, 2):fill(self.location_gaussian_std)
   local buffer_lm = self.buffer2:resize(N, 2)
   for t = 1, T do
     if prev_h then
@@ -113,11 +146,14 @@ function ram:forward(image, smapledLocation)
     end
     table.insert(rnnInputs, rnnInput)
     h[{{}, t}], prev_c = self.rnns[t]:forward(rnnInput)
+    score[{{}, t}] = self.classificationNets[t]:forward(h[{{}, t}])
     
     if t < T then
       if not isGlimpseRandom then
         l[{{}, t+1}] = self.locationNets[t]:forward(h[{{}, t}])
         if computeLocation then
+--      randomkit.normal(buffer_lm, l[{{}, t}], std)
+--      l_m[{{}, t+1}]:copy(buffer_lm)
           sampleFromGaussion(l_m[{{}, t+1}], l[{{}, t+1}], std)
         end
       else
@@ -130,35 +166,54 @@ function ram:forward(image, smapledLocation)
     prev_h = h[{{}, t}]
   end
   self.rnnInputs = rnnInputs
-  local score = self.classificationNet:forward(prev_h)
   return score, l_m
 end
 
-function ram:backward(gradScore, l_m, reward)
-  local N, T, l, sigma = gradScore:size(1), self.T, self.l, self.location_gaussian_std
+-- score: N x T x C, label: N
+function ram:computeLoss(score, label)
+  local N, T = score:size(1), self.T
+  local score_view = score:view(N * T, -1)
+  local label_view = label.new():resize(N * T):copy(label:view(N,1):expand(N,T))
+  return self.classificationCriterior:forward(score_view, label_view)
+--  return self.classificationCriterior:forward(score[{{}, self.T}], label)
+end
+
+-- for each sample, reward and b are scaler, so in batch, reward and b are vector of size N, 
+function ram:backwardFromClassification(score, label, l_m)
+  local N, T = score:size(1), self.T
   local rnnGradOutput, rnn_grad_c_next, rnn_grad_h_next, grad_g = nil, nil, nil, nil
-  local reward_expand = nil
-  if reward then
-    reward_expand = self.buffer1:resize(N):copy(reward):view(N,1):expand(N,2)
-  end
-  local grad_h = self.classificationNet:backward(self.h[{{}, T}], gradScore)
+  local score_view = score:view(N * T, -1)
+  local label_view = label.new():resize(N * T):copy(label:view(N,1):expand(N,T))
+  local gradScore = self.classificationCriterior:backward(score_view, label_view):view(N, T, -1)
+--  local gradScore = self.classificationCriterior:backward(score[{{}, T}], label)
   for t = T, 1, -1 do
+--    local grad_h = self.classificationNets[t]:backward(self.h[{{}, t}], gradScore)
+    local grad_h = self.classificationNets[t]:backward(self.h[{{}, t}], gradScore[{{}, t}])
     if rnn_grad_h_next then
       rnnGradOutput = {rnn_grad_c_next, rnn_grad_h_next, grad_h}
     else
       rnnGradOutput = grad_h
     end
     rnn_grad_c_next, rnn_grad_h_next, grad_g = unpack(self.rnns[t]:backward(self.rnnInputs[t], rnnGradOutput))
-    local grad_l = self.glimpses[t]:backward({self.patch[{{}, t}], l_m[{{}, t}]}, grad_g)[2]
-    if t > 1 then
-      if reward_expand then
-        grad_l:cmul(reward_expand)
-        grad_l:cmul(reward_expand):cmul(l_m[{{}, t}] - l[{{}, t}]):div(sigma * sigma)
-        grad_h = self.locationNets[t-1]:backward(self.h[{{}, t-1}], grad_l)
-      else
-        grad_h:fill(0)
-      end
-      
+    self.glimpses[t]:backward({self.patch[{{}, t}], l_m[{{}, t}]}, grad_g)
+  end
+end
+
+-- reward - vector of N
+function ram:backwardFromLocation(reward, l_m)
+  local rnnGradOutput, rnn_grad_c_next, rnn_grad_h_next, grad_g = nil, nil, nil, nil
+  local N, sigma, l = reward:size(1), self.location_gaussian_std, self.l
+  local reward_expand = self.buffer1:resize(N):copy(reward):view(N,1):expand(N,2)
+  for t = self.T, 2, -1 do
+    local grad_l = torch.cmul(l_m[{{}, t}] - l[{{}, t}], reward_expand)/(sigma * sigma)
+--    local grad_l = reward.new():resize(N, 2):copy(reward_expand)
+    local grad_h = self.locationNets[t]:backward(self.h[{{}, t-1}], grad_l)
+    if not rnn_grad_h_next then
+      rnnGradOutput = {rnn_grad_c_next, rnn_grad_h_next, grad_h}
+    else
+      rnnGradOutput = grad_h
     end
+    rnn_grad_c_next, rnn_grad_h_next, grad_g = unpack(self.rnns[t-1]:backward(self.rnnInputs[t-1], rnnGradOutput))
+    self.glimpses[t]:backward({self.patch[{{}, t}], l_m[{{}, t}]}, grad_g)
   end
 end

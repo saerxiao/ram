@@ -37,7 +37,7 @@ function glimpse.computePatch(image, l_m, patchSize, exploration_rate)
 --  low:maskedFill(mask, 1)
 --  hi:maskedFill(mask, self.patchSize)
   
-  local patch = image.new():resize(N, patchSize, patchSize)
+  local patch = image.new():resize(N, patchSize, patchSize):fill(0)
   for i = 1, image:size(1) do
     if low[i][1] > 0 and low[i][2] > 0  and hi[i][1] <= imageSizeX and hi[i][2] <= imageSizeY then
       patch[{i}] = image[{i, 1}]:sub(low[i][1], hi[i][1], low[i][2], hi[i][2])
