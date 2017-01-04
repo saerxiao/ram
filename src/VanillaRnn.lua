@@ -2,7 +2,7 @@ require 'torch'
 require 'nn'
 
 
-local layer, parent = torch.class('VanillaRnn', 'nn.Module')
+local layer, parent = torch.class('nn.VanillaRnn', 'nn.Module')
 
 --[[
 If we add up the sizes of all the tensors for output, gradInput, weights,
@@ -28,34 +28,18 @@ function layer:__init(input_dim, hidden_dim)
   self.gradBias = torch.Tensor(H):zero()
   self:reset()
 
---  self.cell = torch.Tensor()    -- This will be (N, H)
---  self.gates = torch.Tensor()   -- This will be (N, 4H)
-----  self.buffer1 = torch.Tensor() -- This will be (N, H)
-----  self.buffer2 = torch.Tensor() -- This will be (N, H)
---  self.buffer3 = torch.Tensor() -- This will be (1, 4H)
---  self.grad_a_buffer = torch.Tensor() -- This will be (N, 4H)
-
---  self.x = torch.Tensor() -- This will be (N, D)
---
   self.prev_h = torch.Tensor()
---  self.prev_c = torch.Tensor()
---  self.remember_states = false
-
---  self.grad_c_next = torch.Tensor()
---  self.grad_h_next = torch.Tensor()
---  self.grad_x = torch.Tensor()
---  self.gradInput = {self.grad_c_next, self.grad_h_next, self.grad_x}
-
 end
 
 
 function layer:reset(std)
-  if not std then
-    std = 1.0 / math.sqrt(self.hidden_dim + self.input_dim)
-  end
-  self.bias:zero()
-  self.bias[{{self.hidden_dim + 1, 2 * self.hidden_dim}}]:fill(1)
-  self.weight:normal(0, std)
+--  if not std then
+--    std = 1.0 / math.sqrt(self.hidden_dim + self.input_dim)
+--  end
+--  self.bias:zero()
+--  self.weight:normal(0, std)
+  self.weight:uniform(-0.1, 0.1)
+  self.bias:uniform(-0.1, 0.1)
   return self
 end
 
@@ -73,24 +57,8 @@ local function check_dims(x, dims)
   end
 end
 
-
-function layer:_unpack_input(input)
-  local c, h, x = nil, nil
-  if torch.type(input) == 'table' and #input == 3 then
-    c, h, x = unpack(input)
-  elseif torch.type(input) == 'table' and #input == 2 then
-    h, x = unpack(input)
-  elseif torch.isTensor(input) then
-    x = input
-  else
-    assert(false, 'invalid input')
-  end
-  return c, h, x
-end
-
-
 function layer:_get_sizes(input, gradOutput)
-  local c0, h0, x = self:_unpack_input(input)
+  local x, h0, c0 = unpack(input)
   local N = x:size(1)
   local H, D = self.hidden_dim, self.input_dim
   check_dims(x, {N, D})
@@ -119,11 +87,11 @@ Output:
 -- input - N x D
 function layer:updateOutput(input)
   self.recompute_backward = true
-  local prev_h, x = self:_unpack_input(input)
+  local x, prev_h = unpack(input)
   local N, D, H = self:_get_sizes(input)
  
   if not prev_h then
-    prev_h = input.new():zeros(N,H)
+    prev_h = x.new():zeros(N,H)
   end
   self.prev_h = prev_h
   
@@ -134,7 +102,7 @@ function layer:updateOutput(input)
   local h = self.output
   h:resize(N, H):zero()
   
-  local gate = input.new():resize(N, H):zero()
+  local gate = x.new():resize(N, H):zero()
   gate:addmm(bias_expand, x, Wx)
   gate:addmm(prev_h, Wh)
   h:tanh(gate)
@@ -149,11 +117,10 @@ function layer:backward(input, gradOutput, scale)
   self.recompute_backward = false
   scale = scale or 1.0
   assert(scale == 1.0, 'must have scale=1')
-  local prev_h, x = self:_unpack_input(input)
+  local x, prev_h = unpack(input)
   if not prev_h then prev_h = self.prev_h end
-  local grad_h_next, grad_h_this = self:_unpack_input(gradOutput)
+  local grad_h_this, grad_h_next = unpack(gradOutput)
 
---  local grad_prev_c, grad_prev_h, grad_x = self.grad_prev_c, self.grad_prev_h, self.grad_x
   local grad_x = x.new():resizeAs(x):zero()
   local N, D, H = self:_get_sizes(input)
 
@@ -170,13 +137,13 @@ function layer:backward(input, gradOutput, scale)
 
   local next_h = self.output
   local h2 = torch.cmul(next_h, next_h)
-  local grad_u = input.new():resizeAs(next_h):zero()
+  local grad_u = x.new():resizeAs(next_h):zero()
   grad_u:fill(1):add(-1, h2):cmul(grad_h)
   
   grad_x:mm(grad_u, Wx:t())
   grad_Wx:addmm(scale, x:t(), grad_u)
   grad_Wh:addmm(scale, prev_h:t(), grad_u)
-  local grad_u_sum = input.new():resize(1, H):sum(grad_u, 1)
+  local grad_u_sum = x.new():resize(1, H):sum(grad_u, 1)
   grad_b:add(scale, grad_u_sum)
 
   grad_h:mm(grad_u, Wh:t()) -- grad_h now means (dLdh(t+1))(dh(t+1)dh(t))
@@ -190,14 +157,9 @@ end
 function layer:clearState()
   self.cell:set()
   self.gates:set()
---  self.buffer1:set()
---  self.buffer2:set()
   self.buffer3:set()
   self.grad_a_buffer:set()
 
---  self.grad_c0:set()
---  self.grad_h0:set()
---  self.grad_x:set()
   self.output:set()
 end
 

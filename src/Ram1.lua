@@ -5,6 +5,7 @@ require 'gnuplot'
 require 'image'
 
 require 'LSTM1'
+require 'VanillaRnn'
 
 local utils = require 'util.utils'
 local glimpse = require 'Glimpse'
@@ -37,6 +38,7 @@ function ram:__init(kwargs)
   self.unitPixels = utils.get_kwarg(kwargs,'unitPixels', 15)
   self.randomGlimpse = utils.get_kwarg(kwargs,'random_glimpse', false)
   self.planRoute = utils.get_kwarg(kwargs,'plan_route', false)
+  local rnnModel = utils.get_kwarg(kwargs, 'rnnModel', 'vanilla')
   
   local T, D, H, C, patchSize, S = self.T, self.D, self.H, self.C, self.patchSize, self.S
   local container = nn.Container()
@@ -46,15 +48,18 @@ function ram:__init(kwargs)
     D, S)
   local glimpses = clone_n_times(container, glimpseNet, T)
   
-  local rnn = nn.LSTM1(D, H)
+  local rnn = nil
+  if rnnModel == 'lstm' then
+    rnn = nn.LSTM1(D, H)
+  else
+    rnn = nn.VanillaRnn(D, H)
+  end
   local rnns = clone_n_times(container, rnn, T)
   
   local classificationNet = nn.Linear(H, C)
---  local classificationNets = clone_n_times(container, classificationNet, E)
   
   local locationNet = nn.Sequential()
   locationNet:add(nn.Linear(H, 2))
---  locationNet:add(nn.Tanh())
   locationNet:add(nn.HardTanh())
   local locationNets = clone_n_times(container, locationNet, T)
   
@@ -143,12 +148,13 @@ function ram:forward(src)
       
     patch[{{}, t}] = glimpse.computePatch(src,l_m[{{}, t}], patchSize, self.unitPixels)
     local processedPatch = self.glimpses[t]:forward({patch[{{}, t}], l_m[{{}, t}]})
-      
-    if prev_h then
-      rnnInput = {prev_c, prev_h, processedPatch}
-    else
-      rnnInput = processedPatch
-    end
+    
+    rnnInput = {processedPatch, prev_h, prev_c}  
+--    if prev_h then
+--      rnnInput = {processedPatch, prev_h, prev_c}
+--    else
+--      rnnInput = processedPatch
+--    end
     table.insert(rnnInputs, rnnInput)
     h[{{}, t}], prev_c = self.rnns[t]:forward(rnnInput)
     prev_h = h[{{}, t}]
@@ -172,12 +178,13 @@ function ram:backward(gradScore, reward)
   local rnnGradOutput, rnn_grad_c_next, rnn_grad_h_next, grad_g = nil, nil, nil, nil
   local grad_h = self.classificationNet:backward(self.h[{{}, T}], gradScore)
   for t = T, 1, -1 do
-    if rnn_grad_h_next then
-      rnnGradOutput = {rnn_grad_c_next, rnn_grad_h_next, grad_h}
-    else
-      rnnGradOutput = grad_h
-    end
-    rnn_grad_c_next, rnn_grad_h_next, grad_g = unpack(self.rnns[t]:backward(self.rnnInputs[t], rnnGradOutput))
+    rnnGradOutput = {grad_h, rnn_grad_h_next, rnn_grad_c_next}
+--    if rnn_grad_h_next then
+--      rnnGradOutput = {grad_h, rnn_grad_h_next, rnn_grad_c_next}
+--    else
+--      rnnGradOutput = grad_h
+--    end
+    grad_g, rnn_grad_h_next, rnn_grad_c_next = unpack(self.rnns[t]:backward(self.rnnInputs[t], rnnGradOutput))
     self.glimpses[t]:backward({self.patch[{{}, t}], l_m[{{}, t}]}, grad_g)
       
     if learnRoute then

@@ -3,6 +3,7 @@ require 'nn'
 
 
 local layer, parent = torch.class('nn.LSTM1', 'nn.Module')
+--local rnnUtils = require 'util.RnnUtils'
 
 --[[
 If we add up the sizes of all the tensors for output, gradInput, weights,
@@ -75,24 +76,8 @@ local function check_dims(x, dims)
   end
 end
 
-
-function layer:_unpack_input(input)
-  local c, h, x = nil, nil, nil
-  if torch.type(input) == 'table' and #input == 3 then
-    c, h, x = unpack(input)
-  elseif torch.type(input) == 'table' and #input == 2 then
-    h, x = unpack(input)
-  elseif torch.isTensor(input) then
-    x = input
-  else
-    assert(false, 'invalid input')
-  end
-  return c, h, x
-end
-
-
 function layer:_get_sizes(input, gradOutput)
-  local c0, h0, x = self:_unpack_input(input)
+  local x, h0, c0 = unpack(input)
   local N = x:size(1)
   local H, D = self.hidden_dim, self.input_dim
   check_dims(x, {N, D})
@@ -121,14 +106,14 @@ Output:
 -- input - N x D
 function layer:updateOutput(input)
   self.recompute_backward = true
-  local prev_c, prev_h, x = self:_unpack_input(input)
+  local x, prev_h, prev_c = unpack(input)
   local N, D, H = self:_get_sizes(input)
 
   if not prev_c then
-    prev_c = input.new():zeros(N, H)
+    prev_c = x.new():zeros(N, H)
   end  
   if not prev_h then
-    prev_h = input.new():zeros(N,H)
+    prev_h = x.new():zeros(N,H)
   end
   self.prev_c = prev_c
   self.prev_h = prev_h
@@ -165,12 +150,11 @@ function layer:backward(input, gradOutput, scale)
   self.recompute_backward = false
   scale = scale or 1.0
   assert(scale == 1.0, 'must have scale=1')
-  local prev_c, prev_h, x = self:_unpack_input(input)
+  local x, prev_h, prev_c = unpack(input)
   if not prev_c then prev_c = self.prev_c end
   if not prev_h then prev_h = self.prev_h end
-  local grad_c_next, grad_h_next, grad_h_this = self:_unpack_input(gradOutput)
+  local grad_h_this, grad_h_next, grad_c_next = unpack(gradOutput)
 
---  local grad_prev_c, grad_prev_h, grad_x = self.grad_prev_c, self.grad_prev_h, self.grad_x
   local grad_x = x.new():resizeAs(x):zero()
   local N, D, H = self:_get_sizes(input)
 
@@ -180,14 +164,10 @@ function layer:backward(input, gradOutput, scale)
   local grad_Wh = self.gradWeight[{{D + 1, D + H}}]
   local grad_b = self.gradBias
 
---  grad_prev_h:resizeAs(prev_h):zero()
---  grad_prev_c:resizeAs(prev_c):zero()
---  grad_x:resizeAs(self.x):zero()
   local grad_h = grad_h_this:clone()
   if grad_h_next then
     grad_h:add(grad_h_next)
   end
---  local grad_next_c = self.buffer2:resizeAs(prev_c):zero()
   local grad_c = grad_h_this.new():resizeAs(prev_c):zero()
   if grad_c_next then
     grad_c:add(grad_c_next)
@@ -205,25 +185,17 @@ function layer:backward(input, gradOutput, scale)
   local grad_ag = grad_a[{{}, {3 * H + 1, 4 * H}}]
   
   local next_h, next_c = self.output, self.cell
-  -- We will use grad_ai, grad_af, and grad_ao as temporary buffers
-  -- to to compute grad_next_c. We will need tanh_next_c (stored in grad_ai)
-  -- to compute grad_ao; the other values can be overwritten after we compute
-  -- grad_next_c
   local tanh_next_c = grad_ai:tanh(next_c)
   local tanh_next_c2 = grad_af:cmul(tanh_next_c, tanh_next_c)
   local my_grad_next_c = grad_ao
   my_grad_next_c:fill(1):add(-1, tanh_next_c2):cmul(o):cmul(grad_h)
   grad_c:add(my_grad_next_c)
   
-  -- We need tanh_next_c (currently in grad_ai) to compute grad_ao; after
-  -- that we can overwrite it.
   grad_ao:fill(1):add(-1, o):cmul(o):cmul(tanh_next_c):cmul(grad_h)
   
-  -- Use grad_ai as a temporary buffer for computing grad_ag
   local g2 = grad_ai:cmul(g, g)
   grad_ag:fill(1):add(-1, g2):cmul(i):cmul(grad_c)
 
-  -- We don't need any temporary storage for these so do them last
   grad_ai:fill(1):add(-1, i):cmul(i):cmul(g):cmul(grad_c)
   grad_af:fill(1):add(-1, f):cmul(f):cmul(prev_c):cmul(grad_c)
   
@@ -236,10 +208,7 @@ function layer:backward(input, gradOutput, scale)
   grad_h:mm(grad_a, Wh:t()) -- grad_h now means (dLdh(t+1))(dh(t+1)dh(t))
   grad_c:cmul(f)
   
---  grad_prev_h:copy(grad_next_h)
---  grad_prev_c:copy(grad_next_c)
-  
-  self.gradInput = {grad_c, grad_h, grad_x}
+  self.gradInput = {grad_x, grad_h, grad_c}
 
   return self.gradInput
 end
@@ -248,14 +217,8 @@ end
 function layer:clearState()
   self.cell:set()
   self.gates:set()
---  self.buffer1:set()
---  self.buffer2:set()
   self.buffer3:set()
   self.grad_a_buffer:set()
-
---  self.grad_c0:set()
---  self.grad_h0:set()
---  self.grad_x:set()
   self.output:set()
 end
 

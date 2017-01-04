@@ -22,6 +22,7 @@ cmd:option('-scales', 1)
 cmd:option('-glimpse_hidden_size', 128)
 cmd:option('-locator_hidden_size', 128)
 cmd:option('-glimpse_output_size', 256)
+cmd:option('-rnnModel', 'lstm')
 cmd:option('-rnn_hidden_size', 256)
 cmd:option('-nClasses', 10)
 cmd:option('-location_gaussian_std', 0.22) -- 0.1
@@ -153,25 +154,13 @@ local feval = function(w)
   train_accuracy = reward:sum()/N
   table.insert(train_accuracy_history, train_accuracy)
   
---  print(net.l)
---  print(net.reward)
   table.insert(location_history, net.l_m:clone())
   table.insert(location_mean_history, net.l:clone())
   table.insert(reward_mean_history, rewardRollingMean)
   reward = (reward - rewardRollingMean) * opt.lamda
   rewardRollingMean = (rewardRollingMean * n + reward:sum()) / (n + reward:nElement())
   table.insert(reward_history, reward)
-  
   n = n + reward:nElement()
---  local rewardBaseline = reward:sum(2) / E  -- N x 1
---  reward:add(-1, rewardBaseline:expand(N, E)):mul(opt.lamda) -- N x E
---  reward:mul(opt.lamda)
-  pos_reward = torch.gt(reward, 0):sum()/N
-  neg_reward = torch.lt(reward, 0):sum()/N
-  zero_reward = torch.eq(reward, 0):sum()/N
-  table.insert(pos_reward_history, pos_reward)
-  table.insert(neg_reward_history, neg_reward)
-  table.insert(zero_reward_history, zero_reward)
   
   local gradScore = criterior:backward(score, label)
   net:backward(gradScore, reward)
