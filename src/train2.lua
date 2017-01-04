@@ -25,9 +25,7 @@ cmd:option('-glimpse_output_size', 256)
 cmd:option('-rnn_hidden_size', 256)
 cmd:option('-nClasses', 10)
 cmd:option('-location_gaussian_std', 0.22) -- 0.1
---cmd:option('-exploration_rate', 1/32)
 cmd:option('-unitPixels', 15, 'the locator unit (1,1) maps to pixels (15,15)')
-cmd:option('-episodes', 1, 'number of episodes')  -- 10 not better
 cmd:option('-lamda', 1)
 cmd:option('-random_glimpse', false, 'whether the glimpses are random')
 cmd:option('-plan_route', true, 'Use a planned route')
@@ -45,7 +43,6 @@ cmd:option('-init_from', '') -- checkpoint/mnist.t7/32x32/var_reduction/epoch50_
 cmd:option('-checkpoint_every', 100)
 cmd:option('-save_every', 1000)
 cmd:option('checkpoint_dir', 'checkpoint', 'dir for saving checkpoints')
---cmd:option('checkpoint_subdir', 'ram_nmist', 'dir for saving checkpoints')
 
 cmd:option('-gpuid',0,'which gpu to use. -1 = use CPU')
 cmd:option('-seed',123,'torch manual random number generator seed')
@@ -126,34 +123,34 @@ local feval = function(w)
   data = data:type(type)
   label = label:type(type)
   last_train_data, last_train_label = data, label
-  local N, E, T, randomGlimpse = data:size(1), opt.episodes, opt.glimpses, opt.random_glimpse
+  local N, T, randomGlimpse = data:size(1), opt.glimpses, opt.random_glimpse
   
   if opt.plan_route then
     local l_m = net.l_m
     local unitPixel = opt.unitPixels
-    l_m:resize(N, E, T, 2):zero()
-    l_m[{{}, {}, 1, 1}]:fill(-4/unitPixel)
-    l_m[{{}, {}, 1, 2}]:fill(-4/unitPixel)
-    l_m[{{}, {}, 2, 1}]:fill(-4/unitPixel)
-    l_m[{{}, {}, 2, 2}]:fill(4/unitPixel)
-    l_m[{{}, {}, 3, 1}]:fill(4/unitPixel)
-    l_m[{{}, {}, 3, 2}]:fill(4/unitPixel)
-    l_m[{{}, {}, 4, 1}]:fill(4/unitPixel)
-    l_m[{{}, {}, 4, 2}]:fill(-4/unitPixel)
+    l_m:resize(N, T, 2):zero()
+    l_m[{{}, 1, 1}]:fill(-4/unitPixel)
+    l_m[{{}, 1, 2}]:fill(-4/unitPixel)
+    l_m[{{}, 2, 1}]:fill(-4/unitPixel)
+    l_m[{{}, 2, 2}]:fill(4/unitPixel)
+    l_m[{{}, 3, 1}]:fill(4/unitPixel)
+    l_m[{{}, 3, 2}]:fill(4/unitPixel)
+    l_m[{{}, 4, 1}]:fill(4/unitPixel)
+    l_m[{{}, 4, 2}]:fill(-4/unitPixel)
   end
 
   local score = net:forward(data)
-  local score_view = score:view(N*E, -1)
-  local label_view = label.new():resize(N*E):copy(label:view(N, 1):expand(N, E))
-  local loss = criterior:forward(score_view, label_view)
+--  local score_view = score:view(N, -1)
+--  local label_view = label.new():resize(N):copy(label:view(N, 1):expand(N, E))
+  local loss = criterior:forward(score, label)
   train_loss = loss
   table.insert(train_loss_history, train_loss)
   
-  local _, predict = score_view:max(2)
+  local _, predict = score:max(2)
   predict = predict:squeeze():type(type)
   
-  local reward = torch.eq(predict, label_view):view(N, E):type(type)
-  train_accuracy = reward:sum()/(N * E)
+  local reward = torch.eq(predict, label):type(type)
+  train_accuracy = reward:sum()/N
   table.insert(train_accuracy_history, train_accuracy)
   
 --  print(net.l)
@@ -169,14 +166,14 @@ local feval = function(w)
 --  local rewardBaseline = reward:sum(2) / E  -- N x 1
 --  reward:add(-1, rewardBaseline:expand(N, E)):mul(opt.lamda) -- N x E
 --  reward:mul(opt.lamda)
-  pos_reward = torch.gt(reward, 0):sum()/(N * E)
-  neg_reward = torch.lt(reward, 0):sum()/(N * E)
-  zero_reward = torch.eq(reward, 0):sum()/(N * E)
+  pos_reward = torch.gt(reward, 0):sum()/N
+  neg_reward = torch.lt(reward, 0):sum()/N
+  zero_reward = torch.eq(reward, 0):sum()/N
   table.insert(pos_reward_history, pos_reward)
   table.insert(neg_reward_history, neg_reward)
   table.insert(zero_reward_history, zero_reward)
   
-  local gradScore = criterior:backward(score_view, label_view):view(N, E, -1)
+  local gradScore = criterior:backward(score, label)
   net:backward(gradScore, reward)
   
   if opt.grad_clip > 0 then
@@ -189,7 +186,7 @@ end
 local validateIter = loader:iterator("validate")
 local function calAccuracy(data, label)
   net:predict()
-  local score = net:forward(data)[{{}, 1}] -- N x C
+  local score = net:forward(data) -- N x C
   local _, predict = score:max(2)
   predict = predict:squeeze():type(label:type())
   local hits = torch.eq(label, predict):sum()
@@ -248,19 +245,18 @@ for i = 1, num_iterations do
     checkpoint.model = net
     checkpoint.opt = opt
     checkpoint.loss = loss[1]
-    checkpoint.train_loss_after = train_loss_after
     local val_loss, val_accuracy = calValidateAccuracy("validate")
     checkpoint.validate_loss = val_loss
     checkpoint.validate_accuracy = val_accuracy
     
-    checkpoint.train_loss_history = train_loss_history
-    checkpoint.train_accuracy_history = train_accuracy_history
-    checkpoint.val_loss_history = val_loss_history
-    checkpoint.val_accuracy_history = val_accuracy_history
-    checkpoint.reward_mean_history = reward_mean_history
-    checkpoint.reward_history = reward_history
-    checkpoint.location_history = location_history
-    checkpoint.location_mean_history = location_mean_history
+--    checkpoint.train_loss_history = train_loss_history
+--    checkpoint.train_accuracy_history = train_accuracy_history
+--    checkpoint.val_loss_history = val_loss_history
+--    checkpoint.val_accuracy_history = val_accuracy_history
+--    checkpoint.reward_mean_history = reward_mean_history
+--    checkpoint.reward_history = reward_history
+--    checkpoint.location_history = location_history
+--    checkpoint.location_mean_history = location_mean_history
     print("i = ", i, " epoch = ", epoch, "train_loss = ", train_loss, "train_accuracy = ", train_accuracy, "val_loss = ", val_loss, "val_accuracy = ", val_accuracy)
 --    print("i = ", i, " epoch = ", epoch, "train_loss = ", train_loss, "train_loss_after = ", train_loss_after, "train_accuracy = ", train_accuracy, "val_loss = ", val_loss, "val_accuracy = ", val_accuracy)
     table.insert(val_loss_history, val_loss)
@@ -285,7 +281,7 @@ for i = 1, num_iterations do
 --  end
 end
 
-local file = string.format('stats.t7', hfolder)
+local file = 'stats.t7'
 local stats = {}
 stats.opt = opt
 stats.iterations = iterations
