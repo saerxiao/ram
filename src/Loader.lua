@@ -4,6 +4,18 @@ require 'paths'
 local Loader = {}
 Loader.__index = Loader
 
+local function rescale(data, min, max, dmin, dmax)
+   local range = max - min
+   local dmin = dmin or data:min()
+   local dmax = dmax or data:max()
+   local drange = dmax - dmin
+
+   data:add(-dmin)
+   data:mul(range)
+   data:mul(1/drange)
+   data:add(min)
+end
+
 local function loadDataset(fileName, maxLoad)
     local f = nil
     if string.match(fileName, '32x32') then
@@ -12,6 +24,7 @@ local function loadDataset(fileName, maxLoad)
       f = torch.load(fileName)
     end
     local data = f.data:type(torch.getdefaulttensortype())
+    rescale(data, 0, 1)
     local labels = f.labels
 
     local nExample = f.data:size(1)
@@ -42,15 +55,18 @@ function Loader.create(opt)
   local self = {}
   setmetatable(self, Loader)
 
-  local path_remote = 'https://s3.amazonaws.com/torch7/data/mnist.t7.tgz'
-  local path_dataset = 'mnist.t7'
-  local path_trainset = paths.concat(path_dataset, 'train_32x32.t7')
-  local path_testset = paths.concat(path_dataset, 'test_32x32.t7')
-  if not paths.filep(path_trainset) or not paths.filep(path_testset) then
-      local remote = path_remote
-      local tar = paths.basename(remote)
-      os.execute('wget ' .. remote .. '; ' .. 'tar xvf ' .. tar .. '; rm ' .. tar)
-  end
+--  local path_remote = 'https://s3.amazonaws.com/torch7/data/mnist.t7.tgz'
+--  local path_dataset = 'mnist.t7'
+--  local path_trainset = paths.concat(path_dataset, 'train_32x32.t7')
+--  local path_testset = paths.concat(path_dataset, 'test_32x32.t7')
+--  if not paths.filep(path_trainset) or not paths.filep(path_testset) then
+--      local remote = path_remote
+--      local tar = paths.basename(remote)
+--      os.execute('wget ' .. remote .. '; ' .. 'tar xvf ' .. tar .. '; rm ' .. tar)
+--  end
+
+  local path_trainset = opt.source .. '/train_' .. opt.dataset .. '.t7'
+  local path_testset = opt.source .. '/test_' .. opt.dataset .. '.t7'
 
   self.trainingData = loadDataset(path_trainset, opt.train_max_load)
   

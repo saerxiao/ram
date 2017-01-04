@@ -1,0 +1,5 @@
+.buildpath
+.project
+.settings/
+checkpoint/
+mnist.t7/*_offcenter*
