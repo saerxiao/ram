@@ -3,3 +3,5 @@
 .settings/
 checkpoint/
 mnist.t7/*_offcenter*
+glimpse/
+saved-model/

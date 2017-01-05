@@ -15,28 +15,33 @@ cmd:option('-dataset', '32x32', 'specify the variation of the dataset') --32x32,
 cmd:option('-validate_split', 0.9, 'sequence length')
 cmd:option('-train_max_load', 10000, 'loading size')
 
+cmd:option('--myModel', true, 'use my implementation')
 -- Model options
 cmd:option('-init_from', '')
 cmd:option('-reset_iterations', 1)
 cmd:option('-glimpses', 4, 'number of glimpses')
 cmd:option('-patch_size', 8)
+cmd:option('--glimpseScale', 2, 'scale of successive patches w.r.t. original input image')
+cmd:option('--glimpseDepth', 1, 'number of concatenated downscaled patches')
 cmd:option('-scales', 1)
 cmd:option('-glimpse_hidden_size', 128)
 cmd:option('-locator_hidden_size', 128)
 cmd:option('-glimpse_output_size', 256)
+cmd:option('--FastLSTM', false, 'use LSTM instead of linear layer')
 cmd:option('-rnn_hidden_size', 256)
 cmd:option('-nClasses', 10)
-cmd:option('-location_gaussian_std', 0.22) -- 0.1
+cmd:option('-location_gaussian_std', 0.11) -- 0.1
+cmd:option('--stochastic', false, 'Reinforce modules forward inputs stochastically during evaluation')
 cmd:option('-unitPixels', 15, 'the locator unit (1,1) maps to pixels (15,15)')
-cmd:option('-episodes', 1, 'number of episodes')  -- 10 not better
+cmd:option('--transfer', 'ReLU', 'activation function')
 cmd:option('-lamda', 1)
 cmd:option('-random_glimpse', false, 'whether the glimpses are random')
-cmd:option('-plan_route', true, 'Use a planned route')
+cmd:option('-plan_route', false, 'Use a planned route')
 
 -- training options
 cmd:option('-batch_size', 20, 'batch size')
 cmd:option('-nepochs', 800, 'number of epochs')
-cmd:option('-learning_rate',1e-4,'learning rate')  -- 1e-3 works fine for plan_route = true, 1e-4 works fine too, trains a little bit slower, but more stable
+cmd:option('-learning_rate',1e-2,'learning rate')  -- 1e-3 works fine for plan_route = true, 1e-4 works fine too, trains a little bit slower, but more stable
 cmd:option('-momentum', 0.9,'momentum')
 cmd:option('-lr_decay_every', 5)   -- lr_decay_every=3, lr_decay_factor=0.9 seems to work well for train_max_load=10000 and batch_size=100
 cmd:option('-lr_decay_factor', 0.7)
@@ -47,7 +52,6 @@ cmd:option('-init_from', '') -- checkpoint/mnist.t7/32x32/var_reduction/epoch50_
 cmd:option('-checkpoint_every', 100)
 cmd:option('-save_every', 1000)
 cmd:option('checkpoint_dir', 'checkpoint', 'dir for saving checkpoints')
---cmd:option('checkpoint_subdir', 'ram_nmist', 'dir for saving checkpoints')
 
 cmd:option('-gpuid',0,'which gpu to use. -1 = use CPU')
 cmd:option('-seed',123,'torch manual random number generator seed')
@@ -87,11 +91,62 @@ if opt.init_from ~= '' then
     start_i = checkpoint.i
   end
 else
---  net = Ram1(opt)
-  
   net = nn.Sequential()
-  ram = Ram1_vr(opt)
-  net:add(ram)
+  if opt.myModel then
+    ram = Ram1_vr(opt)
+    net:add(ram)
+  else
+    -- glimpse network (rnn input layer)
+   local locationSensor = nn.Sequential()
+   locationSensor:add(nn.SelectTable(2))
+   locationSensor:add(nn.Linear(2, opt.locator_hidden_size))
+   locationSensor:add(nn[opt.transfer]())
+
+   local glimpseSensor = nn.Sequential()
+   glimpseSensor:add(nn.SpatialGlimpse(opt.patch_size, opt.glimpseDepth, opt.glimpseScale):float())
+   glimpseSensor:add(nn.Collapse(3))
+   glimpseSensor:add(nn.Linear((opt.patch_size^2)*opt.glimpseDepth, opt.glimpse_hidden_size))
+   glimpseSensor:add(nn[opt.transfer]())
+
+   local glimpse = nn.Sequential()
+   glimpse:add(nn.ConcatTable():add(locationSensor):add(glimpseSensor))
+   glimpse:add(nn.JoinTable(1,1))
+   glimpse:add(nn.Linear(opt.glimpse_hidden_size+opt.locator_hidden_size, opt.glimpse_output_size))
+   glimpse:add(nn[opt.transfer]())
+   glimpse:add(nn.Linear(opt.glimpse_output_size, opt.rnn_hidden_size))
+
+   -- rnn recurrent layer
+   local recurrent = nil
+   if opt.FastLSTM then
+     recurrent = nn.FastLSTM(opt.rnn_hidden_size, opt.rnn_hidden_size)
+   else
+     recurrent = nn.Linear(opt.rnn_hidden_size, opt.rnn_hidden_size)
+   end
+
+
+   -- recurrent neural network
+   local rnn = nn.Recurrent(opt.rnn_hidden_size, glimpse, recurrent, nn[opt.transfer](), 99999)
+
+   -- actions (locator)
+   local imageSize = 32
+   local locator = nn.Sequential()
+   locator:add(nn.Linear(opt.rnn_hidden_size, 2))
+   locator:add(nn.HardTanh()) -- bounds mean between -1 and 1
+   locator:add(nn.ReinforceNormal(2*opt.location_gaussian_std, opt.stochastic)) -- sample from normal, uses REINFORCE learning rule
+   assert(locator:get(3).stochastic == opt.stochastic, "Please update the dpnn package : luarocks install dpnn")
+   locator:add(nn.HardTanh()) -- bounds sample between -1 and 1
+   locator:add(nn.MulConstant(opt.unitPixels*2/imageSize))
+
+   ram = nn.RecurrentAttention(rnn, locator, opt.glimpses, {opt.rnn_hidden_size})
+   
+   -- model is a reinforcement learning agent
+   net:add(ram)
+
+   -- classifier :
+   net:add(nn.SelectTable(-1))
+   net:add(nn.Linear(opt.rnn_hidden_size, opt.nClasses))
+   net:add(nn.LogSoftMax())
+  end
 
   -- add the baseline reward predictor
   local seq = nn.Sequential()
@@ -101,16 +156,15 @@ else
   local concat2 = nn.ConcatTable():add(nn.Identity()):add(concat)
   net:add(concat2)
   if opt.uniform > 0 then
-      for k,param in ipairs(seq:parameters()) do
-         param:uniform(-opt.uniform, opt.uniform)
-      end
---      for k,param in ipairs(net:parameters()) do
+--      for k,param in ipairs(seq:parameters()) do
 --         param:uniform(-opt.uniform, opt.uniform)
 --      end
+      for k,param in ipairs(net:parameters()) do
+         param:uniform(-opt.uniform, opt.uniform)
+      end
     end
 end
 
---local criterior = nn.CrossEntropyCriterion()
 local criterior = nn.ParallelCriterion(true)
       :add(nn.ModuleCriterion(nn.ClassNLLCriterion(), nil, nn.Convert())) -- BACKPROP
       :add(nn.ModuleCriterion(nn.VRClassReward(net, opt.lamda), nil, nn.Convert())) -- REINFORCE
@@ -141,7 +195,6 @@ local last_train_data, last_train_label = nil, nil
 local rewardRollingMean = 0
 local n = 0
 local feval = function(w)
-  ram:isTrain()
   if w ~= params then
     params:copy(w)
   end
@@ -168,8 +221,6 @@ local feval = function(w)
   end
 
   local outputTable = net:forward(data)
---  local score_view = score:view(N, -1)
---  local label_view = label.new():resize(N):copy(label:view(N, 1):expand(N, E))
   local loss = criterior:forward(outputTable, label)
   table.insert(train_loss_history, loss)
   
@@ -183,21 +234,16 @@ local feval = function(w)
 --  print(net.reward)
 --  local ram = net:findModules('Ram1_vr')[1]
   
-  
   local gradLoss = criterior:backward(outputTable, label)
   net:backward(data, gradLoss)
   
-  table.insert(location_history, ram.l_m:clone())
-  table.insert(location_mean_history, ram.l:clone())
-  table.insert(reward_history, ram.reward:clone())
+--  table.insert(location_history, ram.l_m:clone())
+--  table.insert(location_mean_history, ram.l:clone())
+--  table.insert(reward_history, ram.reward:clone())
   if opt.grad_clip > 0 then
     grads:clamp(-opt.grad_clip, opt.grad_clip)
   end
   
---  print(loss)
---  if loss < -1 then
---    print(loss)
---  end
   return loss, grads
 end
 
@@ -214,14 +260,6 @@ local function calAccuracy(data, label)
 
   return loss, hits/nTotal
 end
-
---local function calTrainEffect()
---  net.planRoute = true
---  net.l_m = location_history[#location_history]
---  local lost, accuracy = calAccuracy(last_train_data, last_train_label)
---  net.planRoute = net.planRoute
---  return lost, accuracy
---end
 
 --local function calValidateAccuracy()
 --  local data, label = validateIter.next_batch()
@@ -271,14 +309,10 @@ for i = 1, num_iterations do
   
 --  local _, loss = optim.adam(feval, params, optim_opt)
   local _, loss = optim.sgd(feval, params, optim_opt)
---  local train_loss_after, train_accuracy_after = calTrainEffect()
-  
---  print(loss[1], train_loss_after)
+
   local check_every = opt.checkpoint_every
---  if i % iter_per_epoch == 0 or i == num_iterations then
   if (i-1) % iter_per_epoch == 0 then
---    print(net.l)
-    
+   
     checkpoint.iter = i
     checkpoint.epoch = epoch
     checkpoint.model = net
@@ -298,7 +332,6 @@ for i = 1, num_iterations do
 --    checkpoint.location_history = location_history
 --    checkpoint.location_mean_history = location_mean_history
     print("i = ", i, " epoch = ", epoch, "train_loss = ", checkpoint.loss, "train_accuracy = ", train_accuracy, "val_loss = ", val_loss, "val_accuracy = ", val_accuracy)
---    print("i = ", i, " epoch = ", epoch, "train_loss = ", train_loss, "train_loss_after = ", train_loss_after, "train_accuracy = ", train_accuracy, "val_loss = ", val_loss, "val_accuracy = ", val_accuracy)
     table.insert(val_loss_history, val_loss)
     table.insert(val_accuracy_history, val_accuracy)
     table.insert(iterations, i)

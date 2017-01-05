@@ -1,3 +1,5 @@
+package.path = package.path .. ";/home/saxiao/ram/src/?.lua"
+
 require 'torch'
 require 'Ram1_vr'
 require 'dp'
@@ -10,6 +12,7 @@ cmd = torch.CmdLine()
 cmd:text()
 cmd:text('Evaluate a Recurrent Model for Visual Attention')
 cmd:text('Options:')
+cmd:option('--myModel', false, 'use my implementation')
 cmd:option('--dir', 'checkpoint/mnist.t7/32x32/', 'dir of the files')
 cmd:option('--xpPath', 'checkpoint/mnist.t7/32x32/epoch100.t7', 'path to a previously saved model')
 --cmd:option('--xpPath', 'saved-model/epoch1.t7', 'path to a previously saved model')
@@ -30,59 +33,54 @@ if opt.cuda then
 end
 
 local function find_epoch(str)
---    return tonumber(string.sub(str, string.len('epoch') + 1, string.find(str,'%.') - 1))
   return tonumber(string.sub(str, string.find(str, 'epoch') + 5, string.len(str) - 3))
 end
   
 local function getFiles(dir)
---  lfs.chdir(dir)
   print(lfs.currentdir())
---  local dir = 'checkpoint/'
   local files = {}
   for file in lfs.dir(dir) do
     if lfs.attributes(dir .. "/" .. file, "mode") == "file" and string.find(file, 'epoch') then
       table.insert(files,dir .. "/" .. file)
     end
   end
---  for file in lfs.dir('.') do
---    if lfs.attributes(file, "mode") == "file" and string.find(file, 'epoch') then
---      table.insert(files, file)
---    end
---  end
-
-  -- sort files by iteration number
-  
 
   table.sort(files, function (a,b) return find_epoch(a) < find_epoch(b) end)
   
   return files
 end
 
+local function erModelRewardLoc(model)
+  local ra = model:findModules('nn.RecurrentAttention')[1]
+  local l_m = torch.Tensor(opt.batchSize,opt.glimpses,2):type(ra:type())
+  for j,location in ipairs(ra.actions) do
+    l_m[{{},j}] = location
+  end
+  local rn = ra.action:getStepModule(1):findModules('nn.ReinforceNormal')[1]
+  local reward = rn.reward
+  return l_m, reward
+end
+
+local function myModelRewardLoc(model)
+  local ra = model:findModules('Ram1_vr')[1]
+  return ra.l_m, ra.reward
+end
+
 local function rewardLoc(xpPath, epoch)
   local xp = torch.load(xpPath)
   local model = xp.model
---model = xp:model().module
-  local ra = model:findModules('Ram1_vr')[1]
---print(ra.reward)
-
-  local glimpses = ra.glimpses
-  local rnns = ra.rnns
-  local locationNets = ra.locationNets
-  local l_m = ra.l_m
-  local reward = ra.reward
+  
+  local l_m, reward = nil, nil
+  if opt.myModel then
+    l_m, reward = myModelRewardLoc(model)
+  else
+    l_m, reward = erModelRewardLoc(model)
+  end
+  
   local heatmaps = {}
   local ll = reward.new():resize(N, T, 2)
   local bn = reward.new():resize(N,T,2)
   for t = 1, T do
---  local glimpse = glimpses[t]
---  print(glimpse.output)
---  print(ra.g[{{}, t}])
-    local rnn = rnns[t]
---  print(rnn.output)
-    local locationNet = locationNets[t]
-  ll[{{}, t}] = locationNet.modules[1].output
---  bn[{{}, t}] = locationNet.modules[2].output
---  print(locationNet.modules[1].output)
     local N = reward:size(1)
     local heatmap = reward.new():resize(imageW, imageW):zero()
     for i = 1, N do
@@ -96,8 +94,6 @@ local function rewardLoc(xpPath, epoch)
     heatmaps[t] = heatmap
   end
 
---  print(ll)
-  --print(bn)
   local g = image.toDisplayTensor{input=heatmaps,nrow=T,padding=3}
   g = image.scale(g, g:size(3)*5, g:size(2)*5)
   image.save("glimpse/a_rl_" .. epoch ..".png", g)
@@ -106,7 +102,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i < 101 then
+  if i > 300 and i < 400 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end
