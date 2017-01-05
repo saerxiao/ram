@@ -59,7 +59,9 @@ function ram:__init(kwargs)
   local classificationNet = nn.Linear(H, C)
   
   local locationNet = nn.Sequential()
-  locationNet:add(nn.Linear(H, 2))
+  local linear = nn.Linear(H, 2)
+  linear:reset(-0.001, 0.001)
+  locationNet:add(linear)
   locationNet:add(nn.HardTanh())
   local locationNets = clone_n_times(container, locationNet, T)
   
@@ -150,11 +152,6 @@ function ram:forward(src)
     local processedPatch = self.glimpses[t]:forward({patch[{{}, t}], l_m[{{}, t}]})
     
     rnnInput = {processedPatch, prev_h, prev_c}  
---    if prev_h then
---      rnnInput = {processedPatch, prev_h, prev_c}
---    else
---      rnnInput = processedPatch
---    end
     table.insert(rnnInputs, rnnInput)
     h[{{}, t}], prev_c = self.rnns[t]:forward(rnnInput)
     prev_h = h[{{}, t}]
@@ -179,11 +176,6 @@ function ram:backward(gradScore, reward)
   local grad_h = self.classificationNet:backward(self.h[{{}, T}], gradScore)
   for t = T, 1, -1 do
     rnnGradOutput = {grad_h, rnn_grad_h_next, rnn_grad_c_next}
---    if rnn_grad_h_next then
---      rnnGradOutput = {grad_h, rnn_grad_h_next, rnn_grad_c_next}
---    else
---      rnnGradOutput = grad_h
---    end
     grad_g, rnn_grad_h_next, rnn_grad_c_next = unpack(self.rnns[t]:backward(self.rnnInputs[t], rnnGradOutput))
     self.glimpses[t]:backward({self.patch[{{}, t}], l_m[{{}, t}]}, grad_g)
       

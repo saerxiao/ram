@@ -22,14 +22,14 @@ cmd:option('-scales', 1)
 cmd:option('-glimpse_hidden_size', 128)
 cmd:option('-locator_hidden_size', 128)
 cmd:option('-glimpse_output_size', 256)
-cmd:option('-rnnModel', 'lstm')
+cmd:option('-rnnModel', 'vanilla')
 cmd:option('-rnn_hidden_size', 256)
 cmd:option('-nClasses', 10)
 cmd:option('-location_gaussian_std', 0.22) -- 0.1
 cmd:option('-unitPixels', 15, 'the locator unit (1,1) maps to pixels (15,15)')
 cmd:option('-lamda', 1)
 cmd:option('-random_glimpse', false, 'whether the glimpses are random')
-cmd:option('-plan_route', true, 'Use a planned route')
+cmd:option('-plan_route', false, 'Use a planned route')
 
 -- training options
 cmd:option('-batch_size', 20, 'batch size')

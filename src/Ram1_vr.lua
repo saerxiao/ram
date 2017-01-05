@@ -44,29 +44,28 @@ function ram:__init(kwargs)
   local T, D, H, C, patchSize, S = self.T, self.D, self.H, self.C, self.patchSize, self.S
   local container = nn.Container()
 
---  local glimpseNet = glimpse.createNet1(patchSize, 
---    utils.get_kwarg(kwargs,'glimpseHiddenSize',128), 
---    utils.get_kwarg(kwargs,'locatorHiddenSize',128), 
---    D, S)
-  local glimpseHiddenSize = utils.get_kwarg(kwargs,'glimpseHiddenSize',128)
-  local locatorHiddenSize = utils.get_kwarg(kwargs,'locatorHiddenSize',128)
-  local locationSensor = nn.Sequential()
-  locationSensor:add(nn.SelectTable(2))
-  locationSensor:add(nn.Linear(2,locatorHiddenSize))
-  locationSensor:add(nn.ReLU())
-
-  local glimpseSensor = nn.Sequential()
-  glimpseSensor:add(nn.SpatialGlimpse(patchSize, self.S, utils.get_kwarg(kwargs,'glimpseScale', 2)):float())
-  glimpseSensor:add(nn.Collapse(3))
-  glimpseSensor:add(nn.Linear((patchSize^2)*self.S, glimpseHiddenSize))
-  glimpseSensor:add(nn.ReLU())
-
-  local glimpseNet = nn.Sequential()
-  glimpseNet:add(nn.ConcatTable():add(locationSensor):add(glimpseSensor))
-  glimpseNet:add(nn.JoinTable(1,1))
-  glimpseNet:add(nn.Linear(glimpseHiddenSize+locatorHiddenSize, self.D))
-  glimpseNet:add(nn.ReLU())
---  glimpseNet:add(nn.Linear(D, H))
+  local glimpseNet = glimpse.createNet1(patchSize, 
+    utils.get_kwarg(kwargs,'glimpseHiddenSize',128), 
+    utils.get_kwarg(kwargs,'locatorHiddenSize',128), 
+    D, S)
+--  local glimpseHiddenSize = utils.get_kwarg(kwargs,'glimpseHiddenSize',128)
+--  local locatorHiddenSize = utils.get_kwarg(kwargs,'locatorHiddenSize',128)
+--  local locationSensor = nn.Sequential()
+--  locationSensor:add(nn.SelectTable(2))
+--  locationSensor:add(nn.Linear(2,locatorHiddenSize))
+--  locationSensor:add(nn.ReLU())
+--
+--  local glimpseSensor = nn.Sequential()
+--  glimpseSensor:add(nn.SpatialGlimpse(patchSize, self.S, utils.get_kwarg(kwargs,'glimpseScale', 2)):float())
+--  glimpseSensor:add(nn.Collapse(3))
+--  glimpseSensor:add(nn.Linear((patchSize^2)*self.S, glimpseHiddenSize))
+--  glimpseSensor:add(nn.ReLU())
+--
+--  local glimpseNet = nn.Sequential()
+--  glimpseNet:add(nn.ConcatTable():add(locationSensor):add(glimpseSensor))
+--  glimpseNet:add(nn.JoinTable(1,1))
+--  glimpseNet:add(nn.Linear(glimpseHiddenSize+locatorHiddenSize, self.D))
+--  glimpseNet:add(nn.ReLU())
   local glimpses = clone_n_times(container, glimpseNet, T)
   
   local rnn = nn.LSTM1(D, H)
@@ -153,17 +152,6 @@ function ram:updateOutput(src)
   local l, l_m, g, h, patch = self.l, self.l_m, self.g, self.h, self.patch
   self.initalHiddenStates = src.new():resize(N, H):zero()
   local initH = self.initalHiddenStates
---  if planRoute then
---    local unitPixel = self.unitPixels
---    l_m[{{}, 1, 1}]:fill(-4/unitPixel)
---    l_m[{{}, 1, 2}]:fill(-4/unitPixel)
---    l_m[{{}, 2, 1}]:fill(-4/unitPixel)
---    l_m[{{}, 2, 2}]:fill(4/unitPixel)
---    l_m[{{}, 3, 1}]:fill(4/unitPixel)
---    l_m[{{}, 3, 2}]:fill(4/unitPixel)
---    l_m[{{}, 4, 1}]:fill(4/unitPixel)
---    l_m[{{}, 4, 2}]:fill(-4/unitPixel)
---  end
   
   local score = src.new():resize(N, C)
   local rnnInputs = {}  
@@ -180,15 +168,11 @@ function ram:updateOutput(src)
         l_m[{{}, t}] = nn.HardTanh():cuda():forward(l_m[{{}, t}])
       end
       
---      patch[{{}, t}] = glimpse.computePatch(src,l_m[{{}, t}], patchSize, self.unitPixels)
---      g[{{}, t}] = self.glimpses[t]:forward({patch[{{}, t}], l_m[{{}, t}]})
-      g[{{}, t}] = self.glimpses[t]:forward({src, l_m[{{}, t}]})
+      patch[{{}, t}] = glimpse.computePatch(src,l_m[{{}, t}], patchSize, self.unitPixels)
+      g[{{}, t}] = self.glimpses[t]:forward({patch[{{}, t}], l_m[{{}, t}]})
+--      g[{{}, t}] = self.glimpses[t]:forward({src, l_m[{{}, t}]})
       
-      if prev_h then
-        rnnInput = {prev_c, prev_h, g[{{}, t}]}
-      else
-        rnnInput = g[{{}, t}]
-      end
+      rnnInput = {g[{{}, t}], prev_h, prev_c}
       table.insert(rnnInputs, rnnInput)
       h[{{}, t}], prev_c = self.rnns[t]:forward(rnnInput)
       
@@ -216,15 +200,11 @@ function ram:backward(input, gradOutput)
   local rnnGradOutput, rnn_grad_c_next, rnn_grad_h_next, grad_g = nil, nil, nil, nil
     local grad_h = self.classificationNet:backward(self.h[{{}, T}], gradOutput)
     for t = T, 1, -1 do
-      if rnn_grad_h_next then
-        rnnGradOutput = {rnn_grad_c_next, rnn_grad_h_next, grad_h}
-      else
-        rnnGradOutput = grad_h
-      end
-      rnn_grad_c_next, rnn_grad_h_next, grad_g = unpack(self.rnns[t]:backward(self.rnnInputs[t], rnnGradOutput))
+      rnnGradOutput = {grad_h, rnn_grad_h_next, rnn_grad_c_next}
+      grad_g, rnn_grad_h_next, rnn_grad_c_next = unpack(self.rnns[t]:backward(self.rnnInputs[t], rnnGradOutput))
       
---      self.glimpses[t]:backward({self.patch[{{}, t}], l_m[{{}, t}]}, grad_g)
-      self.glimpses[t]:backward({input, l_m[{{}, t}]}, grad_g)
+      self.glimpses[t]:backward({self.patch[{{}, t}], l_m[{{}, t}]}, grad_g)
+--      self.glimpses[t]:backward({input, l_m[{{}, t}]}, grad_g)
       if learnRoute then
         local grad_l = (l_m[{{}, t}] - l[{{}, t}]) / (-sigma * sigma)
         grad_l:cmul(reward_expand)

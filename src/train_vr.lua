@@ -1,3 +1,5 @@
+package.path = package.path .. ";/home/saxiao/ram/src/?.lua"
+
 require 'torch'
 require 'Ram1_vr'
 require 'nn'
@@ -34,7 +36,7 @@ cmd:option('-plan_route', true, 'Use a planned route')
 -- training options
 cmd:option('-batch_size', 20, 'batch size')
 cmd:option('-nepochs', 800, 'number of epochs')
-cmd:option('-learning_rate',1e-3,'learning rate')  -- 1e-3 works fine for plan_route = true, 1e-4 works fine too, trains a little bit slower, but more stable
+cmd:option('-learning_rate',1e-4,'learning rate')  -- 1e-3 works fine for plan_route = true, 1e-4 works fine too, trains a little bit slower, but more stable
 cmd:option('-momentum', 0.9,'momentum')
 cmd:option('-lr_decay_every', 5)   -- lr_decay_every=3, lr_decay_factor=0.9 seems to work well for train_max_load=10000 and batch_size=100
 cmd:option('-lr_decay_factor', 0.7)
