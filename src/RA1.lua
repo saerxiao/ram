@@ -8,16 +8,19 @@
 ------------------------------------------------------------------------
 local RecurrentAttention, parent = torch.class("nn.RA1", "nn.AbstractSequencer")
 
-function RecurrentAttention:__init(rnn, action, nStep, hiddenSize)
+function RecurrentAttention:__init(rnn, action, nStep, hiddenSize, myRnn)
    parent.__init(self)
    assert(torch.isTypeOf(action, 'nn.Module'))
    assert(torch.type(nStep) == 'number')
    assert(torch.type(hiddenSize) == 'table')
    assert(torch.type(hiddenSize[1]) == 'number', "Does not support table hidden layers" )
    
+   self.myRnn = myRnn
    self.rnn = rnn
-   -- we can decorate the module with a Recursor to make it AbstractRecurrent
---   self.rnn = (not torch.isTypeOf(rnn, 'nn.AbstractRecurrent')) and nn.Recursor(rnn) or rnn
+   if not myRnn then
+    -- we can decorate the module with a Recursor to make it AbstractRecurrent
+     self.rnn = (not torch.isTypeOf(rnn, 'nn.AbstractRecurrent')) and nn.Recursor(rnn) or rnn
+   end
    
    -- samples an x,y actions for each example
    self.action =  (not torch.isTypeOf(action, 'nn.AbstractRecurrent')) and nn.Recursor(action) or action 
@@ -60,7 +63,12 @@ function RecurrentAttention:updateOutput(input)
 end
 
 function RecurrentAttention:updateGradInput(input, gradOutput)
-   assert(self.rnn.step == self.nStep, "inconsistent rnn steps")
+   if self.myRnn then
+     assert(self.rnn.step == self.nStep, "inconsistent rnn steps")
+   else
+     assert(self.rnn.step - 1 == self.nStep, "inconsistent rnn steps")
+   end
+   
    assert(torch.type(gradOutput) == 'table', "expecting gradOutput table")
    assert(#gradOutput == self.nStep, "gradOutput should have nStep elements")
     
@@ -107,7 +115,11 @@ function RecurrentAttention:updateGradInput(input, gradOutput)
 end
 
 function RecurrentAttention:accGradParameters(input, gradOutput, scale)
---   assert(self.rnn.step - 1 == self.nStep, "inconsistent rnn steps")
+--   if self.myRnn then
+--     assert(self.rnn.step == self.nStep, "inconsistent rnn steps")
+--   else
+--     assert(self.rnn.step - 1 == self.nStep, "inconsistent rnn steps")
+--   end
    assert(torch.type(gradOutput) == 'table', "expecting gradOutput table")
    assert(#gradOutput == self.nStep, "gradOutput should have nStep elements")
    
@@ -129,7 +141,7 @@ function RecurrentAttention:accGradParameters(input, gradOutput, scale)
 end
 
 function RecurrentAttention:accUpdateGradParameters(input, gradOutput, lr)
-   assert(self.rnn.step - 1 == self.nStep, "inconsistent rnn steps")
+--   assert(self.rnn.step - 1 == self.nStep, "inconsistent rnn steps")
    assert(torch.type(gradOutput) == 'table', "expecting gradOutput table")
    assert(#gradOutput == self.nStep, "gradOutput should have nStep elements")
     

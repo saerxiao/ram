@@ -16,12 +16,14 @@ require 'RA1'
 require 'RecurrentAttentionModel'
 
 cmd = torch.CmdLine()
+cmd:option('--myModel', false, 'use my implementation')
+cmd:text('myRnn', true, 'use my implementation of the Recurrent module')
+
 cmd:option('-source', 'mnist.t7', 'directory for source data')
 cmd:option('-dataset', '32x32', 'specify the variation of the dataset') --32x32, offcenter_100x100 
 cmd:option('-validate_split', 0.9, 'sequence length')
 cmd:option('-train_max_load', -1, 'loading size')
 
-cmd:option('--myModel', false, 'use my implementation')
 -- Model options
 cmd:option('-init_from', '')
 cmd:option('-reset_iterations', 1)
@@ -32,9 +34,9 @@ cmd:option('--glimpseDepth', 1, 'number of concatenated downscaled patches')
 cmd:option('-scales', 1)
 cmd:option('-glimpse_hidden_size', 128)
 cmd:option('-locator_hidden_size', 128)
-cmd:option('-glimpse_output_size', 256)
+cmd:option('-imageHiddenSize', 256)
 cmd:option('--FastLSTM', false, 'use LSTM instead of linear layer')
-cmd:option('-rnn_hidden_size', 256)
+cmd:option('-rnnHiddenSize', 256)
 cmd:option('-nClasses', 10)
 cmd:option('-location_gaussian_std', 0.11) -- 0.1
 cmd:option('--stochastic', false, 'Reinforce modules forward inputs stochastically during evaluation')
@@ -117,44 +119,56 @@ else
    local glimpse = nn.Sequential()
    glimpse:add(nn.ConcatTable():add(locationSensor):add(glimpseSensor))
    glimpse:add(nn.JoinTable(1,1))
-   glimpse:add(nn.Linear(opt.glimpse_hidden_size+opt.locator_hidden_size, opt.glimpse_output_size))
+   glimpse:add(nn.Linear(opt.glimpse_hidden_size+opt.locator_hidden_size, opt.imageHiddenSize))
    glimpse:add(nn[opt.transfer]())
---   glimpse:add(nn.Linear(opt.glimpse_output_size, opt.rnn_hidden_size))
+   if not opt.myRnn then
+    glimpse:add(nn.Linear(opt.imageHiddenSize, opt.rnnHiddenSize))
+   end
 
    -- rnn recurrent layer
    local recurrent = nil
    if opt.FastLSTM then
---     recurrent = nn.FastLSTM(opt.rnn_hidden_size, opt.rnn_hidden_size)
-     recurrent = nn.LSTM1(opt.glimpse_output_size, opt.rnn_hidden_size)
+     if opt.myRnn then
+       recurrent = nn.LSTM1(opt.imageHiddenSize, opt.rnnHiddenSize)
+     else
+       recurrent = nn.FastLSTM(opt.rnnHiddenSize, opt.rnnHiddenSize)
+     end     
    else
---     recurrent = nn.Linear(opt.rnn_hidden_size, opt.rnn_hidden_size)
-     recurrent = nn.VanillaRnn(opt.glimpse_output_size, opt.rnn_hidden_size)
+     if opt.myRnn then
+       recurrent = nn.VanillaRnn(opt.imageHiddenSize, opt.rnnHiddenSize)
+     else
+       recurrent = nn.Linear(opt.rnnHiddenSize, opt.rnnHiddenSize)
+     end
    end
 
 
    -- recurrent neural network
---   local rnn = nn.Recurrent(opt.rnn_hidden_size, glimpse, recurrent, nn[opt.transfer](), 99999)
-   local rnn = nn.Rnn(opt.rnn_hidden_size, glimpse, recurrent, nn[opt.transfer](), opt.glimpses)
+   local rnn = nil
+   if opt.myRnn then
+     rnn = nn.Rnn(opt.rnnHiddenSize, glimpse, recurrent, nn[opt.transfer](), opt.glimpses)
+   else
+     rnn = nn.Recurrent(opt.rnnHiddenSize, glimpse, recurrent, nn[opt.transfer](), 99999)
+   end
 
    -- actions (locator)
    local imageSize = 32
    local locator = nn.Sequential()
-   locator:add(nn.Linear(opt.rnn_hidden_size, 2))
+   locator:add(nn.Linear(opt.rnnHiddenSize, 2))
    locator:add(nn.HardTanh()) -- bounds mean between -1 and 1
    locator:add(nn.ReinforceNormal(2*opt.location_gaussian_std, opt.stochastic)) -- sample from normal, uses REINFORCE learning rule
    assert(locator:get(3).stochastic == opt.stochastic, "Please update the dpnn package : luarocks install dpnn")
    locator:add(nn.HardTanh()) -- bounds sample between -1 and 1
    locator:add(nn.MulConstant(opt.unitPixels*2/imageSize))
 
---   ram = nn.RecurrentAttention(rnn, locator, opt.glimpses, {opt.rnn_hidden_size})
-    ram = nn.RA1(rnn, locator, opt.glimpses, {opt.rnn_hidden_size})
+--   ram = nn.RecurrentAttention(rnn, locator, opt.glimpses, {opt.rnnHiddenSize})
+    ram = nn.RA1(rnn, locator, opt.glimpses, {opt.rnnHiddenSize}, opt.myRnn)
    
    -- model is a reinforcement learning agent
    net:add(ram)
 
    -- classifier :
    net:add(nn.SelectTable(-1))
-   net:add(nn.Linear(opt.rnn_hidden_size, opt.nClasses))
+   net:add(nn.Linear(opt.rnnHiddenSize, opt.nClasses))
    net:add(nn.LogSoftMax())
   end
 
@@ -166,13 +180,16 @@ else
   local concat2 = nn.ConcatTable():add(nn.Identity()):add(concat)
   net:add(concat2)
   if opt.uniform > 0 then
+    if opt.myRnn then
       for k,param in ipairs(seq:parameters()) do
-         param:uniform(-opt.uniform, opt.uniform)
+        param:uniform(-opt.uniform, opt.uniform)
       end
---      for k,param in ipairs(net:parameters()) do
---         param:uniform(-opt.uniform, opt.uniform)
---      end
+    else
+      for k,param in ipairs(net:parameters()) do
+        param:uniform(-opt.uniform, opt.uniform)
+      end
     end
+  end
 end
 
 local criterior = nn.ParallelCriterion(true)

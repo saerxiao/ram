@@ -15,19 +15,20 @@ cmd = torch.CmdLine()
 cmd:text()
 cmd:text('Evaluate a Recurrent Model for Visual Attention')
 cmd:text('Options:')
+cmd:option('--myScript', true, 'use my implementation')
 cmd:option('--myModel', false, 'use my implementation')
-cmd:option('--dir', 'checkpoint/mnist.t7/32x32/', 'dir of the files')
-cmd:option('--xpPath', 'checkpoint/mnist.t7/32x32/epoch100.t7', 'path to a previously saved model')
---cmd:option('--xpPath', 'saved-model/epoch1.t7', 'path to a previously saved model')
-cmd:option('--cuda', true, 'model was saved with cuda')
+cmd:option('--raModule', 'nn.RA1', 'name of the reccurent attention module')  --nn. RA1, nn.RecurrentAttention
+cmd:option('--dir', 'checkpoint/mnist.t7/32x32', 'dir of the files') -- saved-model checkpoint/mnist.t7/32x32/
 cmd:option('-glimpses', 4, 'number of glimpses')
 cmd:option('-glimpseOutputSize', 256)
 cmd:option('--batchSize', 20, 'batch size')
+cmd:option('--imageWidth', 32, 'batch size')
+cmd:option('--cuda', true, 'model was saved with cuda')
 cmd:text()
 local opt = cmd:parse(arg or {})
 
 local N, D = opt.batchSize, opt.glimpseOutputSize
-local T, imageW = 4, 32
+local T, imageW, raModule = opt.glimpses, opt.imageWidth, opt.raModule
 
 if opt.cuda then
    require 'cunn'
@@ -52,8 +53,7 @@ local function getFiles(dir)
 end
 
 local function erModelRewardLoc(model)
-  local ra = model:findModules('nn.RA1')[1]
---  local ra = model:findModules('nn.RecurrentAttention')[1]
+  local ra = model:findModules(raModule)[1]
   local l_m = torch.Tensor(opt.batchSize,opt.glimpses,2):type(ra:type())
   for j,location in ipairs(ra.actions) do
     l_m[{{},j}] = location
@@ -70,7 +70,12 @@ end
 
 local function rewardLoc(xpPath, epoch)
   local xp = torch.load(xpPath)
-  local model = xp.model
+  local model = nil
+  if opt.myScript then
+    model = xp.model
+  else
+    model = xp:model().module
+  end
   
   local l_m, reward = nil, nil
   if opt.myModel then
@@ -105,7 +110,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i > 54 and i < 56 then
+  if i >19 and i < 22 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end
