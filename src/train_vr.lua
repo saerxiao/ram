@@ -8,14 +8,20 @@ require 'pl'
 require 'image'
 require 'dp'
 require 'rnn'
+require 'Rnn'
+require 'LSTM1'
+require 'VanillaRnn'
+require 'RA1'
+
+require 'RecurrentAttentionModel'
 
 cmd = torch.CmdLine()
 cmd:option('-source', 'mnist.t7', 'directory for source data')
 cmd:option('-dataset', '32x32', 'specify the variation of the dataset') --32x32, offcenter_100x100 
 cmd:option('-validate_split', 0.9, 'sequence length')
-cmd:option('-train_max_load', 10000, 'loading size')
+cmd:option('-train_max_load', -1, 'loading size')
 
-cmd:option('--myModel', true, 'use my implementation')
+cmd:option('--myModel', false, 'use my implementation')
 -- Model options
 cmd:option('-init_from', '')
 cmd:option('-reset_iterations', 1)
@@ -113,19 +119,22 @@ else
    glimpse:add(nn.JoinTable(1,1))
    glimpse:add(nn.Linear(opt.glimpse_hidden_size+opt.locator_hidden_size, opt.glimpse_output_size))
    glimpse:add(nn[opt.transfer]())
-   glimpse:add(nn.Linear(opt.glimpse_output_size, opt.rnn_hidden_size))
+--   glimpse:add(nn.Linear(opt.glimpse_output_size, opt.rnn_hidden_size))
 
    -- rnn recurrent layer
    local recurrent = nil
    if opt.FastLSTM then
-     recurrent = nn.FastLSTM(opt.rnn_hidden_size, opt.rnn_hidden_size)
+--     recurrent = nn.FastLSTM(opt.rnn_hidden_size, opt.rnn_hidden_size)
+     recurrent = nn.LSTM1(opt.glimpse_output_size, opt.rnn_hidden_size)
    else
-     recurrent = nn.Linear(opt.rnn_hidden_size, opt.rnn_hidden_size)
+--     recurrent = nn.Linear(opt.rnn_hidden_size, opt.rnn_hidden_size)
+     recurrent = nn.VanillaRnn(opt.glimpse_output_size, opt.rnn_hidden_size)
    end
 
 
    -- recurrent neural network
-   local rnn = nn.Recurrent(opt.rnn_hidden_size, glimpse, recurrent, nn[opt.transfer](), 99999)
+--   local rnn = nn.Recurrent(opt.rnn_hidden_size, glimpse, recurrent, nn[opt.transfer](), 99999)
+   local rnn = nn.Rnn(opt.rnn_hidden_size, glimpse, recurrent, nn[opt.transfer](), opt.glimpses)
 
    -- actions (locator)
    local imageSize = 32
@@ -137,7 +146,8 @@ else
    locator:add(nn.HardTanh()) -- bounds sample between -1 and 1
    locator:add(nn.MulConstant(opt.unitPixels*2/imageSize))
 
-   ram = nn.RecurrentAttention(rnn, locator, opt.glimpses, {opt.rnn_hidden_size})
+--   ram = nn.RecurrentAttention(rnn, locator, opt.glimpses, {opt.rnn_hidden_size})
+    ram = nn.RA1(rnn, locator, opt.glimpses, {opt.rnn_hidden_size})
    
    -- model is a reinforcement learning agent
    net:add(ram)
@@ -156,12 +166,12 @@ else
   local concat2 = nn.ConcatTable():add(nn.Identity()):add(concat)
   net:add(concat2)
   if opt.uniform > 0 then
---      for k,param in ipairs(seq:parameters()) do
---         param:uniform(-opt.uniform, opt.uniform)
---      end
-      for k,param in ipairs(net:parameters()) do
+      for k,param in ipairs(seq:parameters()) do
          param:uniform(-opt.uniform, opt.uniform)
       end
+--      for k,param in ipairs(net:parameters()) do
+--         param:uniform(-opt.uniform, opt.uniform)
+--      end
     end
 end
 
@@ -268,13 +278,11 @@ end
 --  return calAccuracy(data, label)
 --end
 
+local valIter = loader:iterator("validate")
 local function calValidateAccuracy()
-  local split = "validate"
-  local it = loader:iterator(split)
-  local iter_per_epoch, T = loader.split_size[split], opt.glimpses
   local nTotal, hits, loss = 0, 0, 0
-  for i = 1, iter_per_epoch do
-    local data, label = it.next_batch()
+  repeat
+    local data, label = valIter.next_batch()
     data = data:type(type)
     label = label:type(type)
     local outputTable = net:forward(data) -- N x C
@@ -283,9 +291,9 @@ local function calValidateAccuracy()
     hits = hits + torch.eq(label, predict):sum()
     nTotal = nTotal + label:size(1)
     
-    loss = loss + criterior:forward(outputTable, label)
-  end
-  return loss/iter_per_epoch, hits/nTotal
+    loss = loss + criterior:forward(outputTable, label) * label:size(1)
+  until nTotal > 100
+  return loss/nTotal, hits/nTotal
 end
 
 if not path.exists(opt.checkpoint_dir) then lfs.mkdir(opt.checkpoint_dir) end

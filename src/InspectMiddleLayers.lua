@@ -7,6 +7,9 @@ require 'rnn'
 require 'optim'
 require 'lfs'
 require 'gnuplot'
+require 'RA1'
+require 'Rnn'
+require 'VanillaRnn'
 
 cmd = torch.CmdLine()
 cmd:text()
@@ -25,8 +28,6 @@ local opt = cmd:parse(arg or {})
 
 local N, D = opt.batchSize, opt.glimpseOutputSize
 local T, imageW = 4, 32
--- check that saved model exists
-assert(paths.filep(opt.xpPath), opt.xpPath..' does not exist')
 
 if opt.cuda then
    require 'cunn'
@@ -51,7 +52,8 @@ local function getFiles(dir)
 end
 
 local function erModelRewardLoc(model)
-  local ra = model:findModules('nn.RecurrentAttention')[1]
+  local ra = model:findModules('nn.RA1')[1]
+--  local ra = model:findModules('nn.RecurrentAttention')[1]
   local l_m = torch.Tensor(opt.batchSize,opt.glimpses,2):type(ra:type())
   for j,location in ipairs(ra.actions) do
     l_m[{{},j}] = location
@@ -77,6 +79,7 @@ local function rewardLoc(xpPath, epoch)
     l_m, reward = erModelRewardLoc(model)
   end
   
+  print(l_m)
   local heatmaps = {}
   local ll = reward.new():resize(N, T, 2)
   local bn = reward.new():resize(N,T,2)
@@ -102,7 +105,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i > 300 and i < 400 then
+  if i > 54 and i < 56 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end

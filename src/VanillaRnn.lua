@@ -33,13 +33,13 @@ end
 
 
 function layer:reset(std)
---  if not std then
---    std = 1.0 / math.sqrt(self.hidden_dim + self.input_dim)
---  end
---  self.bias:zero()
---  self.weight:normal(0, std)
-  self.weight:uniform(-0.1, 0.1)
-  self.bias:uniform(-0.1, 0.1)
+  if not std then
+    std = 1.0 / math.sqrt(self.hidden_dim + self.input_dim)
+  end
+  self.bias:zero()
+  self.weight:normal(0, std)
+--  self.weight:uniform(-0.1, 0.1)
+--  self.bias:uniform(-0.1, 0.1)
   return self
 end
 
@@ -148,7 +148,7 @@ function layer:backward(input, gradOutput, scale)
 
   grad_h:mm(grad_u, Wh:t()) -- grad_h now means (dLdh(t+1))(dh(t+1)dh(t))
   
-  self.gradInput = {grad_h, grad_x}
+  self.gradInput = {grad_x, grad_h}
 
   return self.gradInput
 end
