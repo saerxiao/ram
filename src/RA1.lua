@@ -6,6 +6,9 @@
 -- hyper-parameters such as the maximum number of steps, 
 -- action (actions sampling module like ReinforceNormal) and 
 ------------------------------------------------------------------------
+
+require 'Recursor'
+
 local RecurrentAttention, parent = torch.class("nn.RA1", "nn.AbstractSequencer")
 
 function RecurrentAttention:__init(rnn, action, nStep, hiddenSize, myRnn)
@@ -19,11 +22,11 @@ function RecurrentAttention:__init(rnn, action, nStep, hiddenSize, myRnn)
    self.rnn = rnn
    if not myRnn then
     -- we can decorate the module with a Recursor to make it AbstractRecurrent
-     self.rnn = (not torch.isTypeOf(rnn, 'nn.AbstractRecurrent')) and nn.Recursor(rnn) or rnn
+     self.rnn = (not torch.isTypeOf(rnn, 'nn.AbstractRecurrent1')) and nn.Recursor1(rnn) or rnn
    end
    
    -- samples an x,y actions for each example
-   self.action =  (not torch.isTypeOf(action, 'nn.AbstractRecurrent')) and nn.Recursor(action) or action 
+   self.action =  (not torch.isTypeOf(action, 'nn.AbstractRecurrent1')) and nn.Recursor1(action) or action 
    self.hiddenSize = hiddenSize
    self.nStep = nStep
    

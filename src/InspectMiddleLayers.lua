@@ -10,15 +10,17 @@ require 'gnuplot'
 require 'RA1'
 require 'Rnn'
 require 'VanillaRnn'
+require 'Recurrent'
+require 'Recursor'
 
 cmd = torch.CmdLine()
 cmd:text()
 cmd:text('Evaluate a Recurrent Model for Visual Attention')
 cmd:text('Options:')
-cmd:option('--myScript', true, 'use my implementation')
+cmd:option('--myScript', false, 'use my implementation')
 cmd:option('--myModel', false, 'use my implementation')
 cmd:option('--raModule', 'nn.RA1', 'name of the reccurent attention module')  --nn. RA1, nn.RecurrentAttention
-cmd:option('--dir', 'checkpoint/mnist.t7/32x32', 'dir of the files') -- saved-model checkpoint/mnist.t7/32x32/
+cmd:option('--dir', 'saved-model', 'dir of the files') -- saved-model checkpoint/mnist.t7/32x32/
 cmd:option('-glimpses', 4, 'number of glimpses')
 cmd:option('-glimpseOutputSize', 256)
 cmd:option('--batchSize', 20, 'batch size')
@@ -110,7 +112,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i >19 and i < 22 then
+  if i >51 and i < 58 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end

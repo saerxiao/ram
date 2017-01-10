@@ -6,6 +6,7 @@ require 'RA1'
 require 'Rnn'
 require 'LSTM1'
 require 'VanillaRnn'
+require 'Recurrent'
 
 -- References :
 -- A. http://papers.nips.cc/paper/5542-recurrent-models-of-visual-attention.pdf
@@ -142,7 +143,7 @@ else
    if opt.myRnn then
      rnn = nn.Rnn(opt.rnnHiddenSize, glimpse, recurrent, nn[opt.transfer](), opt.rho)
    else
-     rnn = nn.Recurrent(opt.rnnHiddenSize, glimpse, recurrent, nn[opt.transfer](), 99999)
+     rnn = nn.Recurrent1(opt.rnnHiddenSize, glimpse, recurrent, nn[opt.transfer](), opt.rho)
    end
 
    imageSize = ds:imageSize('h')
