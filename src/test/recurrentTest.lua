@@ -16,23 +16,40 @@ function recurrentTest.shareWeight()
   
   local params, grads = rnn:getParameters()
   params:uniform(-0.1, 0.1)
+  grads:zero()
 
-  local weight1 = rnn.initialModule.modules[1].weight
-  local weight2 = rnn.sharedClones[1].modules[1].modules[1].weight
-  local weight3 = rnn.sharedClones[2].modules[1].modules[1].weight
-  print(weight1, weight2, weight3)
-  assert(torch.all(torch.eq(weight1, weight2)), 'initalModule and the first recurrent module do not share the same inputModule')
-  assert(torch.all(torch.eq(weight2, weight3)), 'the first and second recurrent modules do not share the same inputModule')
-  local x = torch.rand(D, H)
-  weight1:add(x)
-  assert(torch.all(torch.eq(weight1, weight2)), 'initalModule and the first recurrent module do not share the same inputModule')
-  assert(torch.all(torch.eq(weight2, weight2)), 'the first and second recurrent modules do not share the same inputModule')
-  print(weight1, weight2, weight3)
---  
---  assert(torch.pointer(rnn.initialModule.modules[1].weight) == torch.pointer(rnn.sharedClones[1].modules[1].modules[1].weight), 
---  'initalModule and the first recurrent module do not share the same inputModule')
---  assert(torch.pointer(rnn.sharedClones[1].modules[1].modules[1].weight) == torch.pointer(rnn.sharedClones[2].modules[1].modules[1].weight), 
---  'the first and second recurrent modules do not share the same inputModule')
+  local gweight1 = rnn.initialModule.modules[1].weight
+  local gweight2 = rnn.sharedClones[1].modules[1].modules[1].weight
+  local gweight3 = rnn.sharedClones[2].modules[1].modules[1].weight
+  assert(torch.all(torch.eq(gweight1, gweight2)), 'initalModule and the first recurrent module do not share the same inputModule weight')
+  assert(torch.all(torch.eq(gweight2, gweight3)), 'the first and second recurrent modules do not share the same inputModule weight')
+  
+  local ggrad1 = rnn.initialModule.modules[1].gradWeight
+  local ggrad2 = rnn.sharedClones[1].modules[1].modules[1].gradWeight
+  local ggrad3 = rnn.sharedClones[2].modules[1].modules[1].gradWeight
+  assert(torch.all(torch.eq(ggrad1, ggrad2)), 'initalModule and the first recurrent module do not share the same inputModule gradWeight')
+  assert(torch.all(torch.eq(ggrad2, ggrad3)), 'the first and second recurrent modules do not share the same inputModule gradWeight')
+
+  ggrad1:add(torch.rand(D, H))  
+  assert(torch.all(torch.eq(ggrad1, ggrad2)), 'initalModule and the first recurrent module do not share the same inputModule gradWeight')
+  assert(torch.all(torch.eq(ggrad2, ggrad3)), 'the first and second recurrent modules do not share the same inputModule gradWeight')
+  
+  gweight1:add(ggrad1)
+  assert(torch.all(torch.eq(gweight1, gweight2)), 'initalModule and the first recurrent module do not share the same inputModule weight')
+  assert(torch.all(torch.eq(gweight2, gweight3)), 'the first and second recurrent modules do not share the same inputModule weight')
+  
+  local rweight1 = rnn.sharedClones[1].modules[1].modules[2].weight
+  local rweight2 = rnn.sharedClones[2].modules[1].modules[2].weight
+  assert(torch.all(torch.eq(rweight1, rweight2)), 'the first and second recurrent modules do not share the same feedbackModule weight')
+  
+  local rgrad1 = rnn.sharedClones[1].modules[1].modules[2].gradWeight
+  local rgrad2 = rnn.sharedClones[2].modules[1].modules[2].gradWeight
+  assert(torch.all(torch.eq(rgrad1, rgrad2)), 'the first and second recurrent modules do not share the same feedbackModule gradWeight')
+  
+  rgrad1:add(torch.rand(H, H))
+  assert(torch.all(torch.eq(rgrad1, rgrad2)), 'the first and second recurrent modules do not share the same feedbackModule gradWeight')
+  rweight1:add(rgrad1)
+  assert(torch.all(torch.eq(rweight1, rweight2)), 'the first and second recurrent modules do not share the same feedbackModule weight')
 end
 
 recurrentTest.shareWeight()
