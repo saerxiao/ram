@@ -50,7 +50,7 @@ end
 function Recurrent:buildInitialModule()
    self.initialModule = nn.Sequential()
    self.initialModule:add(self.inputModule:clone('weight', 'bias', 'gradWeight', 'gradBias'))
-   self.initialModule:add(self.startModule)
+--   self.initialModule:add(self.startModule)
    self.initialModule:add(self.transferModule:clone('weight', 'bias', 'gradWeight', 'gradBias'))
 end
 
@@ -165,25 +165,25 @@ function Recurrent:includingSharedClones(f)
    return r
 end
 
-function Recurrent:reinforce(reward)
-   if torch.type(reward) == 'table' then
-      -- multiple rewards, one per time-step
-      local rewards = reward
-      for step, reward in ipairs(rewards) do
-         if step == 1 then
-            self.initialModule:reinforce(reward)
-         else
-            local sm = self:getStepModule(step)
-            sm:reinforce(reward)
-         end
-      end
-   else
-      -- one reward broadcast to all time-steps
-      return self:includingSharedClones(function()
-         return parent.reinforce(self, reward)
-      end)
-   end
-end
+--function Recurrent:reinforce(reward)
+--   if torch.type(reward) == 'table' then
+--      -- multiple rewards, one per time-step
+--      local rewards = reward
+--      for step, reward in ipairs(rewards) do
+--         if step == 1 then
+--            self.initialModule:reinforce(reward)
+--         else
+--            local sm = self:getStepModule(step)
+--            sm:reinforce(reward)
+--         end
+--      end
+--   else
+--      -- one reward broadcast to all time-steps
+--      return self:includingSharedClones(function()
+--         return parent.reinforce(self, reward)
+--      end)
+--   end
+--end
 
 function Recurrent:maskZero()
    error("Recurrent doesn't support maskZero as it uses a different "..
