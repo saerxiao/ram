@@ -7,6 +7,7 @@ require 'rnn'
 require 'Recurrent'
 require 'Rnn'
 require 'VanillaRnn'
+require 'gnuplot'
 
 local gradcheck = require 'util.gradcheck'
 
@@ -267,4 +268,26 @@ function recurrentTest.rnnGradiantCheck()
   assert(dw_err < 1e-5)
 end
 
-recurrentTest.rnnGradiantCheck()
+local function modelForward(rnn, initialParams, T, N, H, x)
+  local params, grads = rnn:getParameters()
+  params:copy(initialParams)
+  
+  local step = torch.Tensor(T, N, H)
+  local h = torch.Tensor(T, N, H)
+  for t = 1, T do
+    step[t]:fill(t)
+    h[t] = rnn:forward(x[t])
+  end
+  return step, h
+end
+
+--TODO: make sure the parameters get updated as expected
+function recurrentTest.testUpdateParameters()
+end
+
+-- TODO: depends on the optimization libary is used, it may rely on different functions, e.g. getParameters, paramters, of updateParameters
+-- need to make sure those functions used in the optimization are implemented properly, and make sure the parameters are actually updated as expected
+function recurrentTest.testTraining()
+end
+
+recurrentTest.shareWeight()

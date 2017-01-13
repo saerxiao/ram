@@ -112,7 +112,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i >23 and i < 33 then
+  if i >83 and i < 220 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end

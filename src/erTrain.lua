@@ -22,7 +22,7 @@ cmd:text('Train a Recurrent Model for Visual Attention')
 cmd:text('Example:')
 cmd:text('$> th rnn-visual-attention.lua > results.txt')
 cmd:text('Options:')
-cmd:option('--myRnn', false, 'use my implementation of the Recurrent module')
+cmd:option('--myRnn', true, 'use my implementation of the Recurrent module')
 cmd:option('--raModule', 'nn.RA1', 'name of the recurrent attention module')  --nn.RecurrentAttention, nn.RA1
 cmd:option('--xpPath', '', 'path to a previously saved model')
 cmd:option('--learningRate', 0.01, 'learning rate at t=0')
@@ -63,7 +63,7 @@ cmd:option('--FastLSTM', false, 'use LSTM instead of linear layer')
 --[[ data ]]--
 cmd:option('--dataset', 'Mnist', 'which dataset to use : Mnist | TranslattedMnist | etc')
 cmd:option('--trainEpochSize', -1, 'number of train examples seen between each epoch')
-cmd:option('--validEpochSize', 100, 'number of valid examples used for early stopping and cross-validation')
+cmd:option('--validEpochSize', -1, 'number of valid examples used for early stopping and cross-validation')
 cmd:option('--noTest', true, 'dont propagate through the test set')
 cmd:option('--overwrite', false, 'overwrite checkpoint')
 
@@ -185,6 +185,8 @@ else
      for k,param in ipairs(agent:parameters()) do
        param:uniform(-opt.uniform, opt.uniform)
      end
+     
+     
 --      if opt.myRnn then
 --        for k,param in ipairs(seq:parameters()) do
 --          param:uniform(-opt.uniform, opt.uniform)
@@ -242,15 +244,8 @@ train = dp.Optimizer{
          for j,location in ipairs(ra.actions) do
           ls[{{},j}] = location
          end
---         print(ls)
---         table.insert(location_history, ls)
          local rn = ra.action:getStepModule(1):findModules('nn.ReinforceNormal')[1] -- reward is the same for each sample in all time steps
---         print(rn.reward)
---         table.insert(reward_history, rn.reward:clone())
-         -- this is the correct place to save the model, as this method is called after the training, so the states in the intermediate time-steps are propperly set
       if report.epoch == epoch then
---        xp.reward_history = reward_history
---        xp.location_history = location_history
         xp.reward = rn.reward:clone()
         xp.l_m = ls
         local savefile = string.format('saved-model/epoch%d.t7', report.epoch)

@@ -34,13 +34,14 @@ function Recurrent:__init(start, input, feedback, transfer, rho, merge)
       error"Recurrent : expecting arg 1 of type nn.Module, torch.LongStorage, number or table"
    end
    
-   self.startModule = start
+--   self.startModule = start
    self.inputModule = input
    self.feedbackModule = feedback
    self.transferModule = transfer or nn.Sigmoid()
    self.mergeModule = merge or nn.CAddTable()
    
-   self.modules = {self.startModule, self.inputModule, self.feedbackModule, self.transferModule, self.mergeModule}
+--   self.modules = {self.startModule, self.inputModule, self.feedbackModule, self.transferModule, self.mergeModule}
+   self.modules = {self.inputModule, self.feedbackModule, self.transferModule, self.mergeModule}
    
    self:buildInitialModule()
    self:buildRecurrentModule(rho)

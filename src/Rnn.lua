@@ -1,25 +1,37 @@
 require 'torch'
 require 'nn'
 
-local rnn, parent = torch.class('nn.Rnn', 'nn.Module')
+local rnn, parent = torch.class('nn.Rnn', 'nn.Container')
 
 local function clone_n_times(container, model, T)
   local t = {}
   for i = 1, T do
-    local cloned = model:clone('weight', 'bias', 'gradWeight', 'gradBias')
-      table.insert(t, cloned)
-      container:add(cloned)
+    local recurrent = model
+    if i > 1 then
+      recurrent = model:clone('weight', 'bias', 'gradWeight', 'gradBias')
+    end
+    
+    table.insert(t, recurrent)
+--      container:add(cloned)
   end
   return t
 end
 
 function rnn:__init(hiddenSize, glimpse, recurrent, transfer, nSteps)
+  parent.__init(self)
   local container = nn.Container()
   self.glimpses = clone_n_times(container, glimpse, nSteps)
   self.rnns = clone_n_times(container, recurrent, nSteps)
+--  self.container = container
+  self.modules = {glimpse, recurrent}
+  
   self.T = nSteps
   self.step = 0
 end
+
+--function rnn:parameters()
+--  return self.container:parameters()
+--end
 
 function rnn:updateOutput(input)
   self.step = self.step + 1
