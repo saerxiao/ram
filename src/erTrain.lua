@@ -8,6 +8,8 @@ require 'LSTM1'
 require 'VanillaRnn'
 require 'Recurrent'
 
+require 'RecurrentAttentionModel'
+
 -- References :
 -- A. http://papers.nips.cc/paper/5542-recurrent-models-of-visual-attention.pdf
 -- B. http://incompleteideas.net/sutton/williams-92.pdf
@@ -23,7 +25,7 @@ cmd:text('Example:')
 cmd:text('$> th rnn-visual-attention.lua > results.txt')
 cmd:text('Options:')
 cmd:option('--myRnn', true, 'use my implementation of the Recurrent module')
-cmd:option('--raModule', 'nn.RA1', 'name of the recurrent attention module')  --nn.RecurrentAttention, nn.RA1
+cmd:option('--raModule', 'nn.RA', 'name of the recurrent attention module')  --nn.RecurrentAttention, nn.RA1
 cmd:option('--xpPath', '', 'path to a previously saved model')
 cmd:option('--learningRate', 0.01, 'learning rate at t=0')
 cmd:option('--minLR', 0.00001, 'minimum learning rate')
@@ -159,7 +161,8 @@ else
    locator:add(nn.MulConstant(opt.unitPixels*2/ds:imageSize("h")))
 
 --   attention = nn.RecurrentAttention(rnn, locator, opt.rho, {opt.rnnHiddenSize})
-   attention = nn.RA1(rnn, locator, opt.rho, {opt.rnnHiddenSize}, opt.myRnn)
+--   attention = nn.RA1(rnn, locator, opt.rho, {opt.rnnHiddenSize}, opt.myRnn)
+   attention = nn.RA(rnn, locator, opt.rho, {opt.rnnHiddenSize}, opt.myRnn)
 
    -- model is a reinforcement learning agent
    agent = nn.Sequential()
@@ -238,14 +241,20 @@ train = dp.Optimizer{
       model:maxParamNorm(opt.maxOutNorm) -- affects params
       model:zeroGradParameters() -- affects gradParams
       
-         model = xp:model().module 
-         ra = model:findModules(opt.raModule)[1]
-         local ls = torch.Tensor(opt.batchSize,opt.rho,2):type(ra:type())
-         for j,location in ipairs(ra.actions) do
-          ls[{{},j}] = location
-         end
-         local rn = ra.action:getStepModule(1):findModules('nn.ReinforceNormal')[1] -- reward is the same for each sample in all time steps
+         
       if report.epoch == epoch then
+        model = xp:model().module 
+        ra = model:findModules(opt.raModule)[1]
+        local ls = torch.Tensor(opt.batchSize,opt.rho,2):type(ra:type())
+        for j,location in ipairs(ra.actions) do
+          ls[{{},j}] = location
+        end
+        local rn = nil
+        if opt.raModule == "nn.RA1" then
+          rn = ra.action:getStepModule(1):findModules('nn.ReinforceNormal')[1] -- reward is the same for each sample in all time steps
+        elseif opt.raModule == "nn.RA" then
+          rn = ra.locator[1]:findModules('nn.ReinforceNormal')[1]
+        end
         xp.reward = rn.reward:clone()
         xp.l_m = ls
         local savefile = string.format('saved-model/epoch%d.t7', report.epoch)

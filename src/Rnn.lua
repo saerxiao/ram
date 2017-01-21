@@ -10,7 +10,6 @@ local function clone_n_times(container, model, T)
     if i > 1 then
       recurrent = model:clone('weight', 'bias', 'gradWeight', 'gradBias')
     end
-    
     table.insert(t, recurrent)
 --      container:add(cloned)
   end

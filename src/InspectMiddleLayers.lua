@@ -12,6 +12,7 @@ require 'Rnn'
 require 'VanillaRnn'
 require 'Recurrent'
 require 'Recursor'
+require 'RecurrentAttentionModel'
 
 cmd = torch.CmdLine()
 cmd:text()
@@ -19,7 +20,7 @@ cmd:text('Evaluate a Recurrent Model for Visual Attention')
 cmd:text('Options:')
 cmd:option('--myScript', false, 'use my implementation')
 cmd:option('--myModel', false, 'use my implementation')
-cmd:option('--raModule', 'nn.RA1', 'name of the reccurent attention module')  --nn. RA1, nn.RecurrentAttention
+cmd:option('--raModule', 'nn.RA', 'name of the reccurent attention module')  --nn. RA1, nn.RecurrentAttention
 cmd:option('--dir', 'saved-model', 'dir of the files') -- saved-model checkpoint/mnist.t7/32x32/
 cmd:option('-glimpses', 4, 'number of glimpses')
 cmd:option('-glimpseOutputSize', 256)
@@ -60,7 +61,12 @@ local function erModelRewardLoc(model)
   for j,location in ipairs(ra.actions) do
     l_m[{{},j}] = location
   end
-  local rn = ra.action:getStepModule(1):findModules('nn.ReinforceNormal')[1]
+  local rn = nil
+  if opt.raModule == 'nn.RA1' then
+    rn = ra.action:getStepModule(1):findModules('nn.ReinforceNormal')[1]
+  elseif opt.raModule == 'nn.RA' then
+    rn = ra.locator[1]:findModules('nn.ReinforceNormal')[1]
+  end
   local reward = rn.reward
   return l_m, reward
 end
@@ -112,7 +118,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i >83 and i < 220 then
+  if i >35 and i < 51 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end
