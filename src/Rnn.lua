@@ -21,7 +21,6 @@ function rnn:__init(hiddenSize, glimpse, recurrent, transfer, nSteps)
   local container = nn.Container()
   self.glimpses = clone_n_times(container, glimpse, nSteps)
   self.rnns = clone_n_times(container, recurrent, nSteps)
---  self.container = container
   self.modules = {glimpse, recurrent}
   
   self.T = nSteps

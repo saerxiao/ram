@@ -2,6 +2,7 @@ require 'torch'
 require 'nn'
 
 local ra, parent = torch.class('nn.RA', 'nn.Container')
+local glimpseUtil = require 'Glimpse'
 
 local function clone_n_times(model, T)
   local t = {}
@@ -19,6 +20,7 @@ function ra:__init(rnn, locator, nGlimpses, params)
   parent.__init(self)
   self.T = nGlimpses
   self.H = params[1]
+  self.patchSize = params[2]
   self.rnn = rnn
   self.locator = clone_n_times(locator, self.T)
   
@@ -26,6 +28,7 @@ function ra:__init(rnn, locator, nGlimpses, params)
   
   self.output = {}
   self.actions = {}
+  self.patches = {}
 end
 
 function ra:updateOutput(input)
@@ -43,7 +46,8 @@ function ra:updateOutput(input)
       l_m = self.locator[t]:forward(rnnOutput)
     end
     self.actions[t] = l_m:clone()
-    rnnOutput = self.rnn:forward({input, l_m})
+    self.patches[t] = glimpseUtil.computePatch(input,l_m, self.patchSize)
+    rnnOutput = self.rnn:forward({self.patches[t], l_m})
     self.output[t] = rnnOutput:clone()
   end
   return self.output
@@ -61,7 +65,8 @@ function ra:backward(input, gradOutput)
     else
       grad_h = gradOutput[t] + gradAction
     end
-    self.gradInput:add(self.rnn:backward({input, self.actions[t]}, grad_h)[1])
+--    self.gradInput:add(self.rnn:backward({input, self.actions[t]}, grad_h)[1])
+    self.rnn:backward({self.patches[t], self.actions[t]}, grad_h)
     if t == 1 then
       actionInput = self.initalHiddenStates
     else

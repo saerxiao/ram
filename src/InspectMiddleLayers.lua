@@ -25,7 +25,7 @@ cmd:option('--dir', 'saved-model', 'dir of the files') -- saved-model checkpoint
 cmd:option('-glimpses', 4, 'number of glimpses')
 cmd:option('-glimpseOutputSize', 256)
 cmd:option('--batchSize', 20, 'batch size')
-cmd:option('--imageWidth', 32, 'batch size')
+cmd:option('--imageWidth', 28, 'batch size')
 cmd:option('--cuda', true, 'model was saved with cuda')
 cmd:text()
 local opt = cmd:parse(arg or {})
@@ -118,7 +118,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i >35 and i < 51 then
+  if i >118 and i <477 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end

@@ -29,9 +29,9 @@ function glimpse.createNet1(patchSize, glimpseHiddenSize, locatorHiddenSize, gli
   return nn.gModule({graph, location}, {g})
 end
 
-function glimpse.computePatch(image, l_m, patchSize, unitPixels)
+function glimpse.computePatch(image, l_m, patchSize)
   local N, nChannel, imageSizeX, imageSizeY = image:size(1), image:size(2), image:size(3), image:size(4)
-  l_m:mul(unitPixels*2/imageSizeX)
+--  l_m:mul(unitPixels*2/imageSizeX)
   assert(nChannel == 1, 'image must only have 1 color channel')
   assert(imageSizeX == imageSizeY, 'image must be square')
 --  local low = (torch.floor(l_m * unitPixels) - patchSize / 2 + 1) + imageSizeX / 2 

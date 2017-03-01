@@ -15,7 +15,7 @@ require 'RecurrentAttentionModel'
 -- B. http://incompleteideas.net/sutton/williams-92.pdf
 
 
-version = 12
+local glimpseUtil = require 'Glimpse'
 
 --[[command line arguments]]--
 cmd = torch.CmdLine()
@@ -104,25 +104,28 @@ if opt.xpPath ~= '' then
 else
 
    -- glimpse network (rnn input layer)
-   locationSensor = nn.Sequential()
-   locationSensor:add(nn.SelectTable(2))
-   locationSensor:add(nn.Linear(2, opt.locatorHiddenSize))
-   locationSensor:add(nn[opt.transfer]())
-
-   glimpseSensor = nn.Sequential()
-   glimpseSensor:add(nn.SpatialGlimpse(opt.glimpsePatchSize, opt.glimpseDepth, opt.glimpseScale):float())
-   glimpseSensor:add(nn.Collapse(3))
-   glimpseSensor:add(nn.Linear(ds:imageSize('c')*(opt.glimpsePatchSize^2)*opt.glimpseDepth, opt.glimpseHiddenSize))
-   glimpseSensor:add(nn[opt.transfer]())
-
-   glimpse = nn.Sequential()
-   glimpse:add(nn.ConcatTable():add(locationSensor):add(glimpseSensor))
-   glimpse:add(nn.JoinTable(1,1))
-   glimpse:add(nn.Linear(opt.glimpseHiddenSize+opt.locatorHiddenSize, opt.imageHiddenSize))
-   glimpse:add(nn[opt.transfer]())
-   if not opt.myRnn then
-    glimpse:add(nn.Linear(opt.imageHiddenSize, opt.rnnHiddenSize))
-   end
+--   locationSensor = nn.Sequential()
+--   locationSensor:add(nn.SelectTable(2))
+--   locationSensor:add(nn.Linear(2, opt.locatorHiddenSize))
+--   locationSensor:add(nn[opt.transfer]())
+--
+--   glimpseSensor = nn.Sequential()
+--   glimpseSensor:add(nn.SpatialGlimpse(opt.glimpsePatchSize, opt.glimpseDepth, opt.glimpseScale):float())
+--   glimpseSensor:add(nn.Collapse(3))
+--   glimpseSensor:add(nn.Linear(ds:imageSize('c')*(opt.glimpsePatchSize^2)*opt.glimpseDepth, opt.glimpseHiddenSize))
+--   glimpseSensor:add(nn[opt.transfer]())
+--
+--   glimpse = nn.Sequential()
+--   glimpse:add(nn.ConcatTable():add(locationSensor):add(glimpseSensor))
+--   glimpse:add(nn.JoinTable(1,1))
+--   glimpse:add(nn.Linear(opt.glimpseHiddenSize+opt.locatorHiddenSize, opt.imageHiddenSize))
+--   glimpse:add(nn[opt.transfer]())
+--   if not opt.myRnn then
+--    glimpse:add(nn.Linear(opt.imageHiddenSize, opt.rnnHiddenSize))
+--   end
+   
+   glimpse = glimpseUtil.createNet1(opt.glimpsePatchSize, opt.glimpseHiddenSize, opt.locatorHiddenSize,
+    opt.imageHiddenSize, opt.glimpseDepth)
 
    -- rnn recurrent layer
    if opt.FastLSTM then
@@ -162,7 +165,7 @@ else
 
 --   attention = nn.RecurrentAttention(rnn, locator, opt.rho, {opt.rnnHiddenSize})
 --   attention = nn.RA1(rnn, locator, opt.rho, {opt.rnnHiddenSize}, opt.myRnn)
-   attention = nn.RA(rnn, locator, opt.rho, {opt.rnnHiddenSize}, opt.myRnn)
+   attention = nn.RA(rnn, locator, opt.rho, {opt.rnnHiddenSize, opt.glimpsePatchSize}, opt.myRnn)
 
    -- model is a reinforcement learning agent
    agent = nn.Sequential()

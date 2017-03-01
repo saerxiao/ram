@@ -3,11 +3,13 @@ require 'nngraph'
 require 'gnuplot'
 --require 'image'
 
---local glimpse = require 'Glimpse'
+local glimpseUtil = require 'Glimpse'
+local glimpse = glimpseUtil.createNet1(8, 128, 128,
+    256, 1)
 
-local x1 = torch.randn(40):mul(100)
-local y1 = torch.randn(40):mul(100)
-gnuplot.plot(x1, y1, '+')
+--local x1 = torch.randn(40):mul(100)
+--local y1 = torch.randn(40):mul(100)
+--gnuplot.plot(x1, y1, '+')
 
 -- scatter plots
 --Plot = require ("itorch.Plot")
