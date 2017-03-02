@@ -34,7 +34,6 @@ end
 function ra:updateOutput(input)
   self.recomputeBackward = true
   self.rnn:forget()
---  self.locator:forget()
   local N, H, T = input:size(1), self.H, self.T
   self.initalHiddenStates = input.new():resize(N, H):zero()
   local initH = self.initalHiddenStates

@@ -13,6 +13,7 @@ require 'VanillaRnn'
 require 'Recurrent'
 require 'Recursor'
 require 'RecurrentAttentionModel'
+require 'ReinforceNormal'
 
 cmd = torch.CmdLine()
 cmd:text()
@@ -65,7 +66,8 @@ local function erModelRewardLoc(model)
   if opt.raModule == 'nn.RA1' then
     rn = ra.action:getStepModule(1):findModules('nn.ReinforceNormal')[1]
   elseif opt.raModule == 'nn.RA' then
-    rn = ra.locator[1]:findModules('nn.ReinforceNormal')[1]
+--    rn = ra.locator[1]:findModules('nn.ReinforceNormal')[1]
+    rn = ra.locator[1]:findModules('nn.ReNormal')[1]
   end
   local reward = rn.reward
   return l_m, reward
@@ -118,7 +120,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i >118 and i <477 then
+  if i > 37 and i < 418 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end

@@ -9,6 +9,7 @@ require 'VanillaRnn'
 require 'Recurrent'
 
 require 'RecurrentAttentionModel'
+require 'ReinforceNormal'
 
 -- References :
 -- A. http://papers.nips.cc/paper/5542-recurrent-models-of-visual-attention.pdf
@@ -25,6 +26,7 @@ cmd:text('Example:')
 cmd:text('$> th rnn-visual-attention.lua > results.txt')
 cmd:text('Options:')
 cmd:option('--myRnn', true, 'use my implementation of the Recurrent module')
+cmd:option('--myReNormal', true, 'use my implementation of the ReinforceNormal module')
 cmd:option('--raModule', 'nn.RA', 'name of the recurrent attention module')  --nn.RecurrentAttention, nn.RA1
 cmd:option('--xpPath', '', 'path to a previously saved model')
 cmd:option('--learningRate', 0.01, 'learning rate at t=0')
@@ -158,8 +160,12 @@ else
    locator = nn.Sequential()
    locator:add(nn.Linear(opt.rnnHiddenSize, 2))
    locator:add(nn.HardTanh()) -- bounds mean between -1 and 1
-   locator:add(nn.ReinforceNormal(2*opt.locatorStd, opt.stochastic)) -- sample from normal, uses REINFORCE learning rule
-   assert(locator:get(3).stochastic == opt.stochastic, "Please update the dpnn package : luarocks install dpnn")
+   if opt.myReNormal then
+     locator:add(nn.ReNormal(2*opt.locatorStd))
+   else
+     locator:add(nn.ReinforceNormal(2*opt.locatorStd, opt.stochastic)) -- sample from normal, uses REINFORCE learning rule
+     assert(locator:get(3).stochastic == opt.stochastic, "Please update the dpnn package : luarocks install dpnn")
+   end
    locator:add(nn.HardTanh()) -- bounds sample between -1 and 1
    locator:add(nn.MulConstant(opt.unitPixels*2/ds:imageSize("h")))
 
@@ -256,7 +262,11 @@ train = dp.Optimizer{
         if opt.raModule == "nn.RA1" then
           rn = ra.action:getStepModule(1):findModules('nn.ReinforceNormal')[1] -- reward is the same for each sample in all time steps
         elseif opt.raModule == "nn.RA" then
-          rn = ra.locator[1]:findModules('nn.ReinforceNormal')[1]
+            if opt.myReNormal then
+              rn = ra.locator[1]:findModules('nn.ReNormal')[1]
+            else
+              rn = ra.locator[1]:findModules('nn.ReinforceNormal')[1]
+            end         
         end
         xp.reward = rn.reward:clone()
         xp.l_m = ls
