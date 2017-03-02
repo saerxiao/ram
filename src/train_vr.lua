@@ -14,6 +14,9 @@ require 'VanillaRnn'
 require 'RA1'
 
 require 'RecurrentAttentionModel'
+require 'ReinforceNormal'
+
+local glimpseUtil = require 'Glimpse'
 
 cmd = torch.CmdLine()
 cmd:option('--myModel', false, 'use my implementation')
@@ -105,25 +108,28 @@ else
     net:add(ram)
   else
     -- glimpse network (rnn input layer)
-   local locationSensor = nn.Sequential()
-   locationSensor:add(nn.SelectTable(2))
-   locationSensor:add(nn.Linear(2, opt.locator_hidden_size))
-   locationSensor:add(nn[opt.transfer]())
-
-   local glimpseSensor = nn.Sequential()
-   glimpseSensor:add(nn.SpatialGlimpse(opt.patch_size, opt.glimpseDepth, opt.glimpseScale):float())
-   glimpseSensor:add(nn.Collapse(3))
-   glimpseSensor:add(nn.Linear((opt.patch_size^2)*opt.glimpseDepth, opt.glimpse_hidden_size))
-   glimpseSensor:add(nn[opt.transfer]())
-
-   local glimpse = nn.Sequential()
-   glimpse:add(nn.ConcatTable():add(locationSensor):add(glimpseSensor))
-   glimpse:add(nn.JoinTable(1,1))
-   glimpse:add(nn.Linear(opt.glimpse_hidden_size+opt.locator_hidden_size, opt.imageHiddenSize))
-   glimpse:add(nn[opt.transfer]())
-   if not opt.myRnn then
-    glimpse:add(nn.Linear(opt.imageHiddenSize, opt.rnnHiddenSize))
-   end
+--   local locationSensor = nn.Sequential()
+--   locationSensor:add(nn.SelectTable(2))
+--   locationSensor:add(nn.Linear(2, opt.locator_hidden_size))
+--   locationSensor:add(nn[opt.transfer]())
+--
+--   local glimpseSensor = nn.Sequential()
+--   glimpseSensor:add(nn.SpatialGlimpse(opt.patch_size, opt.glimpseDepth, opt.glimpseScale):float())
+--   glimpseSensor:add(nn.Collapse(3))
+--   glimpseSensor:add(nn.Linear((opt.patch_size^2)*opt.glimpseDepth, opt.glimpse_hidden_size))
+--   glimpseSensor:add(nn[opt.transfer]())
+--
+--   local glimpse = nn.Sequential()
+--   glimpse:add(nn.ConcatTable():add(locationSensor):add(glimpseSensor))
+--   glimpse:add(nn.JoinTable(1,1))
+--   glimpse:add(nn.Linear(opt.glimpse_hidden_size+opt.locator_hidden_size, opt.imageHiddenSize))
+--   glimpse:add(nn[opt.transfer]())
+--   if not opt.myRnn then
+--    glimpse:add(nn.Linear(opt.imageHiddenSize, opt.rnnHiddenSize))
+--   end
+   
+   glimpse = glimpseUtil.createNet1(opt.patch_size, opt.glimpse_hidden_size, opt.locator_hidden_size,
+    opt.imageHiddenSize, opt.glimpseDepth)
 
    -- rnn recurrent layer
    local recurrent = nil
@@ -155,13 +161,15 @@ else
    local locator = nn.Sequential()
    locator:add(nn.Linear(opt.rnnHiddenSize, 2))
    locator:add(nn.HardTanh()) -- bounds mean between -1 and 1
-   locator:add(nn.ReinforceNormal(2*opt.location_gaussian_std, opt.stochastic)) -- sample from normal, uses REINFORCE learning rule
-   assert(locator:get(3).stochastic == opt.stochastic, "Please update the dpnn package : luarocks install dpnn")
+--   locator:add(nn.ReinforceNormal(2*opt.location_gaussian_std, opt.stochastic)) -- sample from normal, uses REINFORCE learning rule
+--   assert(locator:get(3).stochastic == opt.stochastic, "Please update the dpnn package : luarocks install dpnn")
+   locator:add(nn.ReNormal(2*opt.location_gaussian_std))
    locator:add(nn.HardTanh()) -- bounds sample between -1 and 1
    locator:add(nn.MulConstant(opt.unitPixels*2/imageSize))
 
 --   ram = nn.RecurrentAttention(rnn, locator, opt.glimpses, {opt.rnnHiddenSize})
-    ram = nn.RA1(rnn, locator, opt.glimpses, {opt.rnnHiddenSize}, opt.myRnn)
+--    ram = nn.RA1(rnn, locator, opt.glimpses, {opt.rnnHiddenSize}, opt.myRnn)
+    ram = nn.RA(rnn, locator, opt.glimpses, {opt.rnnHiddenSize, opt.patch_size}, opt.myRnn)
    
    -- model is a reinforcement learning agent
    net:add(ram)
@@ -180,15 +188,18 @@ else
   local concat2 = nn.ConcatTable():add(nn.Identity()):add(concat)
   net:add(concat2)
   if opt.uniform > 0 then
-    if opt.myRnn then
-      for k,param in ipairs(seq:parameters()) do
-        param:uniform(-opt.uniform, opt.uniform)
-      end
-    else
-      for k,param in ipairs(net:parameters()) do
-        param:uniform(-opt.uniform, opt.uniform)
-      end
+    for k,param in ipairs(net:parameters()) do
+      param:uniform(-opt.uniform, opt.uniform)
     end
+--    if opt.myRnn then
+--      for k,param in ipairs(seq:parameters()) do
+--        param:uniform(-opt.uniform, opt.uniform)
+--      end
+--    else
+--      for k,param in ipairs(net:parameters()) do
+--        param:uniform(-opt.uniform, opt.uniform)
+--      end
+--    end
   end
 end
 
@@ -313,12 +324,12 @@ local function calValidateAccuracy()
   return loss/nTotal, hits/nTotal
 end
 
-if not path.exists(opt.checkpoint_dir) then lfs.mkdir(opt.checkpoint_dir) end
-lfs.chdir(opt.checkpoint_dir)
-if not path.exists(opt.source) then lfs.mkdir(opt.source) end
-lfs.chdir(opt.source)
-if not path.exists(opt.dataset) then lfs.mkdir(opt.dataset) end
-lfs.chdir(opt.dataset)
+--if not path.exists(opt.checkpoint_dir) then lfs.mkdir(opt.checkpoint_dir) end
+--lfs.chdir(opt.checkpoint_dir)
+--if not path.exists(opt.source) then lfs.mkdir(opt.source) end
+--lfs.chdir(opt.source)
+--if not path.exists(opt.dataset) then lfs.mkdir(opt.dataset) end
+--lfs.chdir(opt.dataset)
 
 local val_loss_history = {}
 local val_accuracy_history = {}
@@ -362,7 +373,8 @@ for i = 1, num_iterations do
     table.insert(iterations, i)
     table.insert(epochs, epoch)
     local save_every = opt.save_every
-    local savefile = string.format('epoch%d.t7', checkpoint.epoch + start_epoch)
+--    local savefile = string.format('epoch%d.t7', checkpoint.epoch + start_epoch)
+    local savefile = string.format('saved-model/epoch%d.t7', checkpoint.epoch)
     torch.save(savefile, checkpoint)
   end
   

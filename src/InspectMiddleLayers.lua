@@ -19,14 +19,14 @@ cmd = torch.CmdLine()
 cmd:text()
 cmd:text('Evaluate a Recurrent Model for Visual Attention')
 cmd:text('Options:')
-cmd:option('--myScript', false, 'use my implementation')
+cmd:option('--myScript', true, 'use my implementation')
 cmd:option('--myModel', false, 'use my implementation')
 cmd:option('--raModule', 'nn.RA', 'name of the reccurent attention module')  --nn. RA1, nn.RecurrentAttention
 cmd:option('--dir', 'saved-model', 'dir of the files') -- saved-model checkpoint/mnist.t7/32x32/
 cmd:option('-glimpses', 4, 'number of glimpses')
 cmd:option('-glimpseOutputSize', 256)
 cmd:option('--batchSize', 20, 'batch size')
-cmd:option('--imageWidth', 28, 'batch size')
+cmd:option('--imageWidth', 32, 'batch size')
 cmd:option('--cuda', true, 'model was saved with cuda')
 cmd:text()
 local opt = cmd:parse(arg or {})
@@ -120,7 +120,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i > 37 and i < 418 then
+  if i > 111 and i < 321 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end
