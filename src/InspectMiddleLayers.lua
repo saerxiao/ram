@@ -110,8 +110,10 @@ local function rewardLoc(xpPath, epoch)
     heatmap:maskedFill(torch.gt(heatmap, 0), 1)
     heatmap:maskedFill(torch.lt(heatmap, 0), -1)
     heatmaps[t] = heatmap
+--    print(heatmap)
   end
-
+  
+  
   local g = image.toDisplayTensor{input=heatmaps,nrow=T,padding=3}
   g = image.scale(g, g:size(3)*5, g:size(2)*5)
   image.save("glimpse/a_rl_" .. epoch ..".png", g)
@@ -120,7 +122,7 @@ end
 
 local files = getFiles(opt.dir)
 for i = 1, #files do
-  if i > 111 and i < 321 then
+  if i > 0 and i < 420 then
     rewardLoc(files[i], i)
     print('printed epoch ' .. i)
   end

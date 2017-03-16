@@ -20,7 +20,8 @@ local glimpseUtil = require 'Glimpse'
 
 cmd = torch.CmdLine()
 cmd:option('--myModel', false, 'use my implementation')
-cmd:text('myRnn', true, 'use my implementation of the Recurrent module')
+cmd:option('--myRnn', true, 'use my implementation of the Recurrent module')
+cmd:option('--myVR', true, 'use my implementation of variance reduction')
 
 cmd:option('-source', 'mnist.t7', 'directory for source data')
 cmd:option('-dataset', '32x32', 'specify the variation of the dataset') --32x32, offcenter_100x100 
@@ -180,13 +181,16 @@ else
    net:add(nn.LogSoftMax())
   end
 
+  if not opt.myVR then
   -- add the baseline reward predictor
-  local seq = nn.Sequential()
-  seq:add(nn.Constant(1,1))
-  seq:add(nn.Add(1))
-  local concat = nn.ConcatTable():add(nn.Identity()):add(seq)
-  local concat2 = nn.ConcatTable():add(nn.Identity()):add(concat)
-  net:add(concat2)
+    local seq = nn.Sequential()
+    seq:add(nn.Constant(1,1))
+    seq:add(nn.Add(1))
+    local concat = nn.ConcatTable():add(nn.Identity()):add(seq)
+    local concat2 = nn.ConcatTable():add(nn.Identity()):add(concat)
+    net:add(concat2)
+  end
+  
   if opt.uniform > 0 then
     for k,param in ipairs(net:parameters()) do
       param:uniform(-opt.uniform, opt.uniform)
@@ -203,14 +207,20 @@ else
   end
 end
 
-local criterior = nn.ParallelCriterion(true)
+  local criterion = nil
+  if opt.myVR then
+    criterion = nn.ClassNLLCriterion()
+  else
+    criterion = nn.ParallelCriterion(true)
       :add(nn.ModuleCriterion(nn.ClassNLLCriterion(), nil, nn.Convert())) -- BACKPROP
-      :add(nn.ModuleCriterion(nn.VRClassReward(net, opt.lamda), nil, nn.Convert())) -- REINFORCE
+      :add(nn.ModuleCriterion(nn.VRClassReward(net, opt.lamda), nil, nn.Convert())) -- REINFORCE 
+  end
+
 
 -- ship the model to the GPU if desired
 if opt.gpuid == 0 then
   net = net:cuda()
-  criterior = criterior:cuda()
+  criterion = criterion:cuda()
   type = net:type()
 end
 
@@ -230,7 +240,7 @@ local location_history = {}
 local location_mean_history = {}
 
 local last_train_data, last_train_label = nil, nil
-local rewardRollingMean = 0
+local rewardRollingMean = 1 + torch.uniform(-0.1, 0.1)
 local n = 0
 local feval = function(w)
   if w ~= params then
@@ -259,25 +269,37 @@ local feval = function(w)
   end
 
   local outputTable = net:forward(data)
-  local loss = criterior:forward(outputTable, label)
+  local loss = criterion:forward(outputTable, label)
   table.insert(train_loss_history, loss)
   
-  local _, predict = outputTable[1]:max(2)
+  local classifierOutput = nil
+  if opt.myVR then
+    classifierOutput = outputTable
+  else
+    classifierOutput = outputTable[1]
+  end
+  local _, predict = classifierOutput:max(2)
   predict = predict:squeeze():type(type)
   
-  train_accuracy = torch.eq(predict, label):sum()/N
+  local reward = torch.eq(predict, label):type(type)
+  train_accuracy = reward:sum()/N
   table.insert(train_accuracy_history, train_accuracy)
   
---  print(net.l)
---  print(net.reward)
---  local ram = net:findModules('Ram1_vr')[1]
+--  if not rewardRollingMean then
+--    rewardRollingMean = reward:sum() / N
+--  end
+--  
+--  rewardRollingMean = (rewardRollingMean * n + reward:sum()) / (n + N)
+--  n = n + N
   
-  local gradLoss = criterior:backward(outputTable, label)
+  local gradLoss = criterion:backward(outputTable, label)
+  if opt.myVR then
+    reward = (reward - train_accuracy) * opt.lamda
+    reward:div(N)
+    ram:reinforce(reward)
+  end
   net:backward(data, gradLoss)
   
---  table.insert(location_history, ram.l_m:clone())
---  table.insert(location_mean_history, ram.l:clone())
---  table.insert(reward_history, ram.reward:clone())
   if opt.grad_clip > 0 then
     grads:clamp(-opt.grad_clip, opt.grad_clip)
   end
@@ -289,12 +311,18 @@ local validateIter = loader:iterator("validate")
 local function calAccuracy(data, label)
   ram:predict()
   local outputTable = net:forward(data) -- N x C
-  local _, predict = outputTable[1]:max(2)
+  local classifierOutput = nil
+  if opt.myVR then
+    classifierOutput = outputTable
+  else
+    classifierOutput = outputTable[1]
+  end
+  local _, predict = classifierOutput:max(2)
   predict = predict:squeeze():type(type)
   local hits = torch.eq(label, predict):sum()
   local nTotal = label:size(1)
     
-  local loss = criterior:forward(outputTable, label)
+  local loss = criterion:forward(outputTable, label)
 
   return loss, hits/nTotal
 end
@@ -314,12 +342,18 @@ local function calValidateAccuracy()
     data = data:type(type)
     label = label:type(type)
     local outputTable = net:forward(data) -- N x C
-    local _, predict = outputTable[1]:max(2)
+    local classifierOutput = nil
+    if opt.myVR then
+      classifierOutput = outputTable
+    else
+      classifierOutput = outputTable[1]
+    end
+    local _, predict = classifierOutput:max(2)
     predict = predict:squeeze():type(label:type())
     hits = hits + torch.eq(label, predict):sum()
     nTotal = nTotal + label:size(1)
     
-    loss = loss + criterior:forward(outputTable, label) * label:size(1)
+    loss = loss + criterion:forward(outputTable, label) * label:size(1)
   until nTotal > 100
   return loss/nTotal, hits/nTotal
 end
@@ -368,6 +402,7 @@ for i = 1, num_iterations do
 --    checkpoint.location_history = location_history
 --    checkpoint.location_mean_history = location_mean_history
     print("i = ", i, " epoch = ", epoch, "train_loss = ", checkpoint.loss, "train_accuracy = ", train_accuracy, "val_loss = ", val_loss, "val_accuracy = ", val_accuracy)
+--    print("rmean = ", rewardRollingMean, " reward = ", reward, " n = ", n)
     table.insert(val_loss_history, val_loss)
     table.insert(val_accuracy_history, val_accuracy)
     table.insert(iterations, i)
